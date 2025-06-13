@@ -1,8 +1,8 @@
 CREATE TABLE full_orders (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  customer_id TEXT, -- changed from VARCHAR
 
   -- Customer Info
+  customer_id TEXT,
   customer_name TEXT,
   customer_email TEXT,
   customer_phone TEXT,
@@ -18,14 +18,18 @@ CREATE TABLE full_orders (
   razorpay_payment_id TEXT,
   razorpay_order_id TEXT,
   razorpay_signature TEXT,
+  razor_payment ENUM('done', 'failed') DEFAULT 'failed',
 
-  -- Product Info
-  product_id INT,
-  product_name TEXT,
-  price DECIMAL(10,2),
-  quantity INT,
-  color TEXT,
-  size TEXT,
+  -- Cart
+  cart_items JSON,
+
+  -- Delivery & Issue Info
+  order_status ENUM('pending', 'packed', 'shipped', 'delivered', 'order-cancelled') DEFAULT 'pending',
+  deliveryman_name TEXT,
+  deliveryman_phone TEXT,
+  issue_type ENUM('damaged', 'color-not-match', 'size-not-match', 'return') DEFAULT NULL,
+  issue_product_code TEXT,
+  issue_description TEXT,
 
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

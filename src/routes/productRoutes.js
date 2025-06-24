@@ -4,13 +4,44 @@ const productController = require('../controllers/productController');
 const { upload, processImage } = require('../middleware/upload');
 const { authenticate } = require("../middleware/authMiddleware");
 const { authorizeRoles } = require("../middleware/roleMiddleware");
-const {encryptResponse,decryptMiddleware,} = require("../middleware/encryption");
+const { decryptMiddleware, wrapEncryptedHandler } = require("../middleware/encryption");
 
-router.post('/',upload.single('image'),processImage,authenticate,authorizeRoles("admin"),encryptResponse,decryptMiddleware,productController.createProductWithVariants);
+const isEncryptionEnabled = process.env.ENCRYPTION_ENABLED === "true";
+
+const withEncryption = (handler) => {
+  return isEncryptionEnabled
+    ? [decryptMiddleware, wrapEncryptedHandler(handler)]
+    : [handler];
+};
+
+// Public routes without encryption
 router.get("/:id", productController.getProductById);
-router.put('/:id',upload.single('image'),processImage,authenticate,authorizeRoles("admin"),encryptResponse,decryptMiddleware,productController.updateProductWithVariants);
+router.get('/', productController.getAllProducts);
 
-router.get('/',productController.getAllProducts);
-router.delete('/:id',decryptMiddleware,encryptResponse, productController.deleteProduct);
+// Protected routes with authentication, authorization and conditional encryption
+router.post(
+  '/',
+  upload.single('image'),
+  processImage,
+  authenticate,
+  authorizeRoles("admin"),
+  ...withEncryption(productController.createProductWithVariants)
+);
+
+router.put(
+  '/:id',
+  upload.single('image'),
+  processImage,
+  authenticate,
+  authorizeRoles("admin"),
+  ...withEncryption(productController.updateProductWithVariants)
+);
+
+router.delete(
+  '/:id',
+  authenticate,
+  authorizeRoles("admin"),
+  ...withEncryption(productController.deleteProduct)
+);
 
 module.exports = router;

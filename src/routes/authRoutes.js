@@ -1,11 +1,23 @@
 const express = require("express");
 const router = express.Router();
-const { register, login } = require("../controllers/authController");
+const authController = require("../controllers/authController");
 const {
-  encryptResponse,
   decryptMiddleware,
+  wrapEncryptedHandler,
 } = require("../middleware/encryption");
-router.post("/register", register);
-router.post("/login", decryptMiddleware, encryptResponse, login);
+
+const isEncryptionEnabled = process.env.ENCRYPTION_ENABLED === "true";
+
+// 🔧 Helper to conditionally wrap handlers with encryption
+const withEncryption = (handler) => {
+  if (isEncryptionEnabled) {
+    return [decryptMiddleware, wrapEncryptedHandler(handler)];
+  }
+  return [handler];
+};
+
+// 👤 Register and Login routes with conditional encryption
+router.post("/register", ...withEncryption(authController.register));
+router.post("/login", ...withEncryption(authController.login));
 
 module.exports = router;

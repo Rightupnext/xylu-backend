@@ -7,7 +7,7 @@ CREATE TABLE full_orders (
   customer_email TEXT,
   customer_phone TEXT,
   customer_address TEXT,
-
+  otp TEXT,
   -- Order Info
   subtotal DECIMAL(10,2),
   shipping DECIMAL(10,2),
@@ -27,9 +27,10 @@ CREATE TABLE full_orders (
   order_status ENUM('pending', 'packed', 'shipped', 'delivered', 'order-cancelled') DEFAULT 'pending',
   deliveryman_name TEXT,
   deliveryman_phone TEXT,
-  issue_type ENUM('damaged', 'color-not-match', 'size-not-match', 'return') DEFAULT NULL,
+  issue_type ENUM('damaged', 'wrong-item-received', 'other','return') DEFAULT NULL,
   issue_product_code TEXT,
   issue_description TEXT,
+  admin_issue_returnReply TEXT,
 
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

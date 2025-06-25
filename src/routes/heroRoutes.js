@@ -5,6 +5,7 @@ const {
   uploadHeroImage,
   getAllHeroImages,
   deleteHeroImage,
+  updateHeroImage
 } = require('../controllers/heroController');
 const { authenticate } = require("../middleware/authMiddleware");
 const { authorizeRoles } = require("../middleware/roleMiddleware");
@@ -27,6 +28,11 @@ router.post(
   '/upload-hero',
   ...withEncryption(upload.single('heroImage')),
   ...withEncryption(uploadHeroImage)
+);
+router.put(
+  '/update-hero/:id',
+  ...withEncryption(upload.single('heroImage')),
+  ...withEncryption(updateHeroImage)
 );
 
 // GET /get-heroes - decrypt request and encrypt response

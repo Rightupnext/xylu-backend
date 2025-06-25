@@ -12,6 +12,7 @@ exports.createProductWithVariants = async (req, res) => {
     price,
     discount,
     trend,
+    Bulk_discount,
     variants,
   } = req.body;
 
@@ -36,8 +37,8 @@ exports.createProductWithVariants = async (req, res) => {
 
     const [productResult] = await connection.query(
       `INSERT INTO boutique_inventory 
-       (product_name, product_code, category, description, image, price, discount, trend) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (product_name, product_code, category, description, image, price, discount, trend,Bulk_discount) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?. ?)`,
       [
         product_name,
         product_code,
@@ -47,6 +48,7 @@ exports.createProductWithVariants = async (req, res) => {
         price,
         discount,
         trend,
+        Bulk_discount,
       ]
     );
 
@@ -87,9 +89,10 @@ exports.updateProductWithVariants = async (req, res) => {
     description,
     price,
     discount,
+    Bulk_discount,
     trend,
     variants,
-    existingImage, // like "product_1749639592984.jpg"
+    existingImage,
   } = req.body;
 
   const uploadDir = path.join(__dirname, "../../uploads/products");
@@ -148,7 +151,7 @@ exports.updateProductWithVariants = async (req, res) => {
     await connection.query(
       `UPDATE boutique_inventory 
        SET product_name = ?, product_code = ?, category = ?, description = ?, 
-           image = ?, price = ?, discount = ?, trend = ?
+           image = ?, price = ?, discount = ?, Bulk_discount = ?, trend = ?
        WHERE id = ?`,
       [
         product_name,
@@ -158,6 +161,7 @@ exports.updateProductWithVariants = async (req, res) => {
         finalImage,
         price,
         discount,
+        Bulk_discount,
         trend,
         id,
       ]

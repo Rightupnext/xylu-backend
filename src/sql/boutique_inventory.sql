@@ -7,6 +7,7 @@ CREATE TABLE boutique_inventory (
     image TEXT,
     price INT NOT NULL,              -- Changed from DECIMAL(10, 2) to INT
     discount INT DEFAULT 0,          -- Changed from DECIMAL(5, 2) to INT
+    Bulk_discount INT DEFAULT 0,  
     trend ENUM('new', 'bestseller', 'regular') DEFAULT 'regular',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

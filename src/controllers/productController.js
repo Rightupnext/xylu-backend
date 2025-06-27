@@ -19,7 +19,7 @@ exports.createProductWithVariants = async (req, res) => {
 
   const image = req.imageFilename || null;
 
-  console.log("image", image);
+  // console.log("image", image);
   let parsedVariants = [];
   try {
     parsedVariants =
@@ -122,9 +122,9 @@ exports.updateProductWithVariants = async (req, res) => {
     const oldImage = rows[0].image;
     let finalImage = oldImage;
 
-    console.log("📷 Old image from DB:", oldImage);
-    console.log("📤 New uploaded image:", newImage);
-    console.log("📝 Existing image from formData:", existingImage);
+    // console.log("📷 Old image from DB:", oldImage);
+    // console.log("📤 New uploaded image:", newImage);
+    // console.log("📝 Existing image from formData:", existingImage);
 
     // Step 2: If a new image is uploaded
     if (newImage) {
@@ -137,10 +137,10 @@ exports.updateProductWithVariants = async (req, res) => {
 
         if (fsSync.existsSync(existingImagePath)) {
           await fs.unlink(existingImagePath);
-          console.log(
-            "🗑 Deleted existing image from formData:",
-            cleanedExistingImage
-          );
+          // console.log(
+          //   "🗑 Deleted existing image from formData:",
+          //   cleanedExistingImage
+          // );
         } else {
           console.warn("⚠️ Existing image not found:", cleanedExistingImage);
         }
@@ -256,7 +256,7 @@ exports.deleteProduct = async (req, res) => {
 
     const cleanImage = image.replace(/^products\//, "").trim();
     const imagePath = path.join(uploadDir, cleanImage);
-    console.log("🧭 Full image path to delete:", imagePath);
+    // console.log("🧭 Full image path to delete:", imagePath);
 
     // Step 2: Delete product and variants
     await db.query(`DELETE FROM boutique_inventory WHERE id = ?`, [id]);
@@ -265,7 +265,7 @@ exports.deleteProduct = async (req, res) => {
     // Step 3: Delete image
     if (cleanImage && fsSync.existsSync(imagePath)) {
       await fs.unlink(imagePath);
-      console.log("🗑 Deleted image from folder:", cleanImage);
+      // console.log("🗑 Deleted image from folder:", cleanImage);
     } else {
       console.log("⚠️ Image file not found or already deleted.");
     }

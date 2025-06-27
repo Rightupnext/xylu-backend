@@ -194,7 +194,6 @@ exports.updateOrder = async (req, res) => {
   }
 };
 
-
 exports.clientUpdateOrderIssue = async (req, res) => {
   const { orderId } = req.params;
   const { issue_type, issue_description } = req.body;
@@ -273,5 +272,76 @@ exports.getUserIdByOrder = async (req, res) => {
   } catch (error) {
     console.error("Get All Orders Error:", error);
     res.status(500).json({ error: "Failed to fetch orders" });
+  }
+};
+exports.getOrderAnalytics = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    let dateFilter = "";
+    if (startDate && endDate) {
+      dateFilter = `AND DATE(created_at) BETWEEN '${startDate}' AND '${endDate}'`;
+    }
+
+    // 1. Grouped analytics by status
+    const [statusResults] = await db.query(`
+      SELECT order_status, COUNT(*) as count, SUM(total) as totalAmount
+      FROM full_orders
+      WHERE razor_payment = 'done' ${dateFilter}
+      GROUP BY order_status
+    `);
+
+    // 2. Overall summary
+    const [overall] = await db.query(`
+      SELECT COUNT(*) as totalOrders, SUM(total) as totalRevenue
+      FROM full_orders
+      WHERE razor_payment = 'done' ${dateFilter}
+    `);
+
+    // 3. Payment history
+    const [paymentHistory] = await db.query(`
+      SELECT 
+        DATE(created_at) AS date, 
+        COUNT(*) AS orders,
+        SUM(total) AS totalAmount
+      FROM full_orders
+      WHERE razor_payment = 'done' ${dateFilter}
+      GROUP BY DATE(created_at)
+      ORDER BY date DESC
+    `);
+
+    // Format results
+    const statusAnalytics = {
+      pending: { count: 0, totalAmount: 0 },
+      packed: { count: 0, totalAmount: 0 },
+      shipped: { count: 0, totalAmount: 0 },
+      delivered: { count: 0, totalAmount: 0 },
+      "order-cancelled": { count: 0, totalAmount: 0 },
+    };
+
+    statusResults.forEach((row) => {
+      if (statusAnalytics[row.order_status]) {
+        statusAnalytics[row.order_status] = {
+          count: row.count,
+          totalAmount: parseFloat(row.totalAmount),
+        };
+      }
+    });
+
+    const analytics = {
+      ...statusAnalytics,
+      totalOrders: overall[0].totalOrders,
+      totalRevenue: parseFloat(overall[0].totalRevenue),
+      paymentHistory: paymentHistory.map((entry) => ({
+        date: entry.date,
+        orders: entry.orders,
+        totalAmount: parseFloat(entry.totalAmount),
+      })),
+    };
+
+    res.json(analytics);
+  } catch (error) {
+    console.error("Order Analytics Error:", error);
+    res.status(500).json({ error: "Failed to generate order analytics" });
   }
 };

@@ -8,6 +8,7 @@ CREATE TABLE boutique_inventory (
     price INT NOT NULL,              -- Changed from DECIMAL(10, 2) to INT
     discount INT DEFAULT 0,          -- Changed from DECIMAL(5, 2) to INT
     Bulk_discount INT DEFAULT 0,  
+    offerExpiry JSON,
     trend ENUM('new', 'bestseller', 'regular') DEFAULT 'regular',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

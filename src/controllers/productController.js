@@ -13,6 +13,7 @@ exports.createProductWithVariants = async (req, res) => {
     discount,
     trend,
     Bulk_discount,
+    offerExpiry,
     variants,
   } = req.body;
 
@@ -37,7 +38,7 @@ exports.createProductWithVariants = async (req, res) => {
 
     const [productResult] = await connection.query(
       `INSERT INTO boutique_inventory 
-       (product_name, product_code, category, description, image, price, discount, trend,Bulk_discount) 
+       (product_name, product_code, category, description, image, price, discount,offerExpiry, trend,Bulk_discount) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?. ?)`,
       [
         product_name,
@@ -47,6 +48,7 @@ exports.createProductWithVariants = async (req, res) => {
         image,
         price,
         discount,
+        JSON.stringify(offerExpiry),
         trend,
         Bulk_discount,
       ]
@@ -90,6 +92,7 @@ exports.updateProductWithVariants = async (req, res) => {
     price,
     discount,
     Bulk_discount,
+    offerExpiry,
     trend,
     variants,
     existingImage,
@@ -151,7 +154,7 @@ exports.updateProductWithVariants = async (req, res) => {
     await connection.query(
       `UPDATE boutique_inventory 
        SET product_name = ?, product_code = ?, category = ?, description = ?, 
-           image = ?, price = ?, discount = ?, Bulk_discount = ?, trend = ?
+           image = ?, price = ?, discount = ?, Bulk_discount = ?,offerExpiry = ?, trend = ?
        WHERE id = ?`,
       [
         product_name,
@@ -162,6 +165,7 @@ exports.updateProductWithVariants = async (req, res) => {
         price,
         discount,
         Bulk_discount,
+        JSON.stringify(offerExpiry),
         trend,
         id,
       ]

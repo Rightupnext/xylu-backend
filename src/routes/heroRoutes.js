@@ -1,21 +1,21 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
 const {
   upload,
   uploadHeroImage,
   getAllHeroImages,
   deleteHeroImage,
-  updateHeroImage
-} = require('../controllers/heroController');
+  updateHeroImage,
+} = require("../controllers/heroController");
 const { authenticate } = require("../middleware/authMiddleware");
 const { authorizeRoles } = require("../middleware/roleMiddleware");
 const {
   decryptMiddleware,
   wrapEncryptedHandler,
-  encryptResponse
+  encryptResponse,
 } = require("../middleware/encryption");
 
-const isEncryptionEnabled = process.env.ENCRYPTION_ENABLED === 'true';
+const isEncryptionEnabled = process.env.ENCRYPTION_ENABLED === "true";
 
 // Helper to wrap route handlers with encryption if enabled
 const withEncryption = (handler) =>
@@ -25,23 +25,20 @@ const withEncryption = (handler) =>
 
 // POST /upload-hero - decrypt request, encrypt response, and upload single hero image
 router.post(
-  '/upload-hero',
-  ...withEncryption(upload.single('heroImage')),
+  "/upload-hero",
+  ...withEncryption(upload.single("heroImage")),
   ...withEncryption(uploadHeroImage)
 );
 router.put(
-  '/update-hero/:id',
-  ...withEncryption(upload.single('heroImage')),
+  "/update-hero/:id",
+  ...withEncryption(upload.single("heroImage")),
   ...withEncryption(updateHeroImage)
 );
 
 // GET /get-heroes - decrypt request and encrypt response
-router.get(
-  '/get-heroes',
-  ...withEncryption(getAllHeroImages)
-);
+router.get("/get-heroes", ...withEncryption(getAllHeroImages));
 
 // DELETE /delete-hero/:filename - No encryption wrapper here (add if needed)
-router.delete('/delete-hero/:filename', deleteHeroImage);
+router.delete("/delete-hero/:filename", deleteHeroImage);
 
 module.exports = router;

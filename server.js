@@ -7,10 +7,10 @@ const app = express();
 
 const authRoutes = require("./src/routes/authRoutes");
 const userRoutes = require("./src/routes/userRoutes");
-const HeroRoutes =require('./src/routes/heroRoutes')
+const HeroRoutes = require("./src/routes/heroRoutes");
 const categoryRoutes = require("./src/routes/categoryRoutes");
-const productRoutes = require('./src/routes/productRoutes');
-const OrderRoutes =require('./src/routes/orderRoutes')
+const productRoutes = require("./src/routes/productRoutes");
+const OrderRoutes = require("./src/routes/orderRoutes");
 app.use(cors());
 app.use(express.json());
 
@@ -18,8 +18,8 @@ app.use("/auth", authRoutes);
 app.use("/users", userRoutes);
 app.use("/hero", HeroRoutes);
 app.use("/categories", categoryRoutes);
-app.use('/products', productRoutes);
-app.use('/order', OrderRoutes);
+app.use("/products", productRoutes);
+app.use("/order", OrderRoutes);
 
 app.use(
   "/uploads/products",

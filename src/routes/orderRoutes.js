@@ -3,7 +3,10 @@ const router = express.Router();
 const orderController = require("../controllers/orderController");
 const { authenticate } = require("../middleware/authMiddleware");
 const { authorizeRoles } = require("../middleware/roleMiddleware");
-const { decryptMiddleware, wrapEncryptedHandler } = require("../middleware/encryption");
+const {
+  decryptMiddleware,
+  wrapEncryptedHandler,
+} = require("../middleware/encryption");
 
 const isEncryptionEnabled = process.env.ENCRYPTION_ENABLED === "true";
 
@@ -29,6 +32,11 @@ router.get(
   "/get-useridby-order",
   authenticate,
   ...withEncryption(orderController.getUserIdByOrder)
+);
+router.get(
+  "/order-analytics",
+  authenticate,
+  ...withEncryption(orderController.getOrderAnalytics)
 );
 
 router.put(

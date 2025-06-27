@@ -110,7 +110,7 @@ exports.updateOrder = async (req, res) => {
     admin_issue_returnReply,
   } = req.body;
 
-  console.log("Incoming Body:", req.body);
+  // console.log("Incoming Body:", req.body);
 
   try {
     // Fetch existing order info
@@ -198,10 +198,10 @@ exports.clientUpdateOrderIssue = async (req, res) => {
   const { orderId } = req.params;
   const { issue_type, issue_description } = req.body;
 
-  console.log("🔧 Updating Order Issue:");
-  console.log("Order ID:", orderId);
-  console.log("Issue Type:", issue_type);
-  console.log("Issue Description:", issue_description);
+  // console.log("🔧 Updating Order Issue:");
+  // console.log("Order ID:", orderId);
+  // console.log("Issue Type:", issue_type);
+  // console.log("Issue Description:", issue_description);
 
   try {
     // Validate input
@@ -227,7 +227,7 @@ exports.clientUpdateOrderIssue = async (req, res) => {
       [orderId]
     );
 
-    console.log("✅ Updated DB Row:", updatedRow[0]);
+    // console.log("✅ Updated DB Row:", updatedRow[0]);
 
     res.json({
       message: "Issue details updated successfully.",

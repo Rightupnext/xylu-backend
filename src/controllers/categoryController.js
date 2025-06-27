@@ -13,7 +13,7 @@ exports.getAllCategories = async (req, res) => {
 // Create new category
 exports.createCategory = async (req, res) => {
   const { category_name } = req.body;
-  console.log("category_name",category_name)
+  // console.log("category_name",category_name)
   try {
     const [result] = await db.query(
       'INSERT INTO categories (category_name) VALUES (?)',

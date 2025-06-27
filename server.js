@@ -11,6 +11,7 @@ const HeroRoutes = require("./src/routes/heroRoutes");
 const categoryRoutes = require("./src/routes/categoryRoutes");
 const productRoutes = require("./src/routes/productRoutes");
 const OrderRoutes = require("./src/routes/orderRoutes");
+const ReviewRoutes=require('./src/routes/reviewRoutes')
 app.use(cors());
 app.use(express.json());
 
@@ -20,6 +21,7 @@ app.use("/hero", HeroRoutes);
 app.use("/categories", categoryRoutes);
 app.use("/products", productRoutes);
 app.use("/order", OrderRoutes);
+app.use("/reviews", ReviewRoutes);
 
 app.use(
   "/uploads/products",

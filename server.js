@@ -38,3 +38,5 @@ app.get("/", (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+console.log("ENV ENCRYPTION_ENABLED:", process.env.ENCRYPTION_ENABLED);
+console.log("ENCRYPTION_ENABLED === 'true':", process.env.ENCRYPTION_ENABLED === 'true');

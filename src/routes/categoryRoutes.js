@@ -15,7 +15,7 @@ const withEncryption = (handler) => {
 };
 
 // Public route (no encryption)
-router.get("/", categoryController.getAllCategories);
+router.get("/", ...withEncryption(categoryController.getAllCategories));
 
 // Protected routes with conditional encryption
 router.post(
@@ -35,6 +35,7 @@ router.put(
 router.delete(
   "/:id",
   authenticate,
+  authorizeRoles('admin'),
   authorizeRoles("admin", "super-admin"),
   ...withEncryption(categoryController.deleteCategory)
 );

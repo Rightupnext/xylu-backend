@@ -165,7 +165,7 @@ exports.updateProductWithVariants = async (req, res) => {
         price,
         discount,
         Bulk_discount,
-        JSON.stringify(offerExpiry),
+        Array.isArray(offerExpiry) ? offerExpiry.join(",") : offerExpiry,
         trend,
         id,
       ]

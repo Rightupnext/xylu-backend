@@ -11,8 +11,10 @@ const HeroRoutes = require("./src/routes/heroRoutes");
 const categoryRoutes = require("./src/routes/categoryRoutes");
 const productRoutes = require("./src/routes/productRoutes");
 const OrderRoutes = require("./src/routes/orderRoutes");
-const ReviewRoutes=require('./src/routes/reviewRoutes')
-app.use(cors());
+const ReviewRoutes = require("./src/routes/reviewRoutes");
+const giftRoute = require("./src/routes/giftRoutes");
+// app.use(cors());
+app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 app.use("/auth", authRoutes);
@@ -22,6 +24,7 @@ app.use("/categories", categoryRoutes);
 app.use("/products", productRoutes);
 app.use("/order", OrderRoutes);
 app.use("/reviews", ReviewRoutes);
+app.use("/gift", giftRoute);
 
 app.use(
   "/uploads/products",
@@ -31,12 +34,24 @@ app.use(
   "/uploads/hero",
   express.static(path.join(__dirname, "uploads/hero")) // ✅ FIXED
 );
+app.use(
+  "/uploads/gifts",
+  express.static(path.join(__dirname, "uploads/gifts")) // ✅ FIXED
+);
 
 app.get("/", (req, res) => {
   res.send("API Running...");
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+const IP = "192.168.1.31";
+// app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+app.listen(5000, IP, () => {
+  console.log(`Server running at http://${IP}:${PORT}/`);
+});
+
 console.log("ENV ENCRYPTION_ENABLED:", process.env.ENCRYPTION_ENABLED);
-console.log("ENCRYPTION_ENABLED === 'true':", process.env.ENCRYPTION_ENABLED === 'true');
+console.log(
+  "ENCRYPTION_ENABLED === 'true':",
+  process.env.ENCRYPTION_ENABLED === "true"
+);

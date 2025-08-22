@@ -7,7 +7,7 @@ CREATE TABLE GiftThreshold (
     start_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     end_date DATETIME NOT NULL,
     active BOOLEAN DEFAULT TRUE,
-    inactive_reason TEXT;
+    inactive_reason TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE CustomerGiftHistory (

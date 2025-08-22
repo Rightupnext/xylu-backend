@@ -37,22 +37,23 @@ exports.createProductWithVariants = async (req, res) => {
     await connection.beginTransaction();
 
     const [productResult] = await connection.query(
-      `INSERT INTO boutique_inventory 
-       (product_name, product_code, category, description, image, price, discount,offerExpiry, trend,Bulk_discount) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?. ?)`,
-      [
-        product_name,
-        product_code,
-        category,
-        description,
-        image,
-        price,
-        discount,
-        JSON.stringify(offerExpiry),
-        trend,
-        Bulk_discount,
-      ]
-    );
+  `INSERT INTO boutique_inventory 
+   (product_name, product_code, category, description, image, price, discount, offerExpiry, trend, Bulk_discount) 
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  [
+    product_name,
+    product_code,
+    category,
+    description,
+    image,
+    price,
+    discount,
+    JSON.stringify(offerExpiry),
+    trend,
+    Bulk_discount,
+  ]
+);
+
 
     const productId = productResult.insertId;
 

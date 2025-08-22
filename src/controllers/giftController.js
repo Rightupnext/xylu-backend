@@ -4,10 +4,10 @@ const db = require("../db");
 
 const parseActive = (active) => {
   if (active === undefined || active === null) return 1; // default = 1
-  if (active === true || active === "true" || active === 1 || active === "1") return 1;
+  if (active === true || active === "true" || active === 1 || active === "1")
+    return 1;
   return 0;
 };
-
 
 // ✅ safer date formatter (accepts YYYY-MM-DD or ISO)
 const formatDateTime = (dateStr) => {
@@ -40,13 +40,22 @@ exports.giftThresholdController = {
   // 🔹 Create or update gift threshold
   createOrUpdate: async (req, res) => {
     try {
-      let { title, description, threshold_amount, start_date, end_date, active } =
-        req.body;
+      let {
+        title,
+        description,
+        threshold_amount,
+        start_date,
+        end_date,
+        active,
+        inactive_reason,
+      } = req.body;
 
       threshold_amount = threshold_amount ? Number(threshold_amount) : 0;
 
       // ✅ If new file uploaded → save relative path
-      const newImageUrl = req.file ? `/uploads/gifts/${req.file.filename}` : null;
+      const newImageUrl = req.file
+        ? `/uploads/gifts/${req.file.filename}`
+        : null;
 
       const startDate = formatDateTime(start_date);
       const endDate = formatDateTime(end_date);
@@ -64,8 +73,8 @@ exports.giftThresholdController = {
         }
 
         const sql = `INSERT INTO GiftThreshold 
-          (title, description, image_url, threshold_amount, start_date, end_date, active)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`;
+          (title, description, image_url, threshold_amount, start_date, end_date, active, inactive_reason)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
         const [result] = await db.execute(sql, [
           title || "",
           description || "",
@@ -74,6 +83,7 @@ exports.giftThresholdController = {
           startDate,
           endDate,
           isActive,
+          inactive_reason || "",
         ]);
         return res.status(201).json({
           message: "Gift threshold created successfully",
@@ -99,7 +109,11 @@ exports.giftThresholdController = {
             );
             fs.unlink(oldImagePath, (err) => {
               if (err) {
-                console.warn("⚠️ Could not delete old image:", oldImagePath, err.message);
+                console.warn(
+                  "⚠️ Could not delete old image:",
+                  oldImagePath,
+                  err.message
+                );
               } else {
                 console.log("🗑️ Old image deleted:", oldImagePath);
               }
@@ -108,8 +122,9 @@ exports.giftThresholdController = {
         }
 
         const sql = `UPDATE GiftThreshold 
-          SET title=?, description=?, image_url=?, threshold_amount=?, start_date=?, end_date=?, active=? 
-          WHERE id=?`;
+  SET title=?, description=?, image_url=?, threshold_amount=?, start_date=?, end_date=?, active=?, inactive_reason=? 
+  WHERE id=?`;
+
         await db.execute(sql, [
           title || "",
           description || "",
@@ -118,6 +133,7 @@ exports.giftThresholdController = {
           startDate,
           endDate,
           isActive,
+          inactive_reason || "",
           existingId,
         ]);
 
@@ -132,4 +148,168 @@ exports.giftThresholdController = {
       res.status(500).json({ message: "Server error", error: error.message });
     }
   },
+};
+exports.checkUserGiftThreshold = async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const [thresholds] = await db.query(`SELECT * FROM GiftThreshold`);
+    const now = new Date();
+
+    let progress = [];
+
+    for (let threshold of thresholds) {
+      const startDate = new Date(threshold.start_date);
+      const endDate = new Date(threshold.end_date);
+
+      // 1️⃣ Offer not started yet
+      if (now < startDate) {
+        progress.push({
+          threshold_id: threshold.id,
+          title: threshold.title,
+          description: threshold.description,
+          image_url: threshold.image_url,
+          required: threshold.threshold_amount,
+          spent: 0,
+          eligible: false,
+          start_date: threshold.start_date,
+          end_date: threshold.end_date,
+          status: "not_started",
+        });
+        // ✅ Do NOT delete/reset table yet for future active offers
+        continue;
+      }
+
+      // 2️⃣ Offer expired
+      if (now > endDate) {
+        await db.query(
+          `DELETE FROM CustomerGiftHistory WHERE user_id=? AND gift_threshold_id=?`,
+          [userId, threshold.id]
+        );
+        continue;
+      }
+
+      // 3️⃣ Offer paused (active = 0, start date reached)
+      if (threshold.active === 0 && now >= startDate) {
+        const [history] = await db.query(
+          `SELECT * FROM CustomerGiftHistory WHERE user_id=? AND gift_threshold_id=?`,
+          [userId, threshold.id]
+        );
+
+        const spent = history.length ? history[0].cumulative_purchase : 0;
+
+        progress.push({
+          threshold_id: threshold.id,
+          title: threshold.title,
+          description: threshold.description,
+          image_url: threshold.image_url,
+          required: threshold.threshold_amount,
+          spent,
+          eligible: history.length ? history[0].eligible : false,
+          start_date: threshold.start_date,
+          end_date: threshold.end_date,
+          status: "paused",
+          inactive_reason: threshold.inactive_reason || "",
+        });
+        continue;
+      }
+
+      // 4️⃣ Active offer (active=1, start date reached)
+      const [totalRow] = await db.query(
+        `SELECT COALESCE(SUM(total),0) AS total_spent
+         FROM full_orders 
+         WHERE customer_id=? AND razor_payment='done' AND created_at BETWEEN ? AND ?`,
+        [userId, threshold.start_date, threshold.end_date]
+      );
+
+      const totalSpent = parseFloat(totalRow[0].total_spent);
+
+      const [history] = await db.query(
+        `SELECT * FROM CustomerGiftHistory WHERE user_id=? AND gift_threshold_id=?`,
+        [userId, threshold.id]
+      );
+
+      if (totalSpent >= threshold.threshold_amount) {
+        if (history.length === 0) {
+          await db.query(
+            `INSERT INTO CustomerGiftHistory 
+             (user_id, gift_threshold_id, cumulative_purchase, eligible, reached_at)
+             VALUES (?,?,?,?,NOW())`,
+            [userId, threshold.id, totalSpent, true]
+          );
+        } else if (!history[0].eligible) {
+          await db.query(
+            `UPDATE CustomerGiftHistory SET cumulative_purchase=?, eligible=1, reached_at=NOW() WHERE id=?`,
+            [totalSpent, history[0].id]
+          );
+        }
+      } else {
+        if (history.length === 0) {
+          await db.query(
+            `INSERT INTO CustomerGiftHistory 
+             (user_id, gift_threshold_id, cumulative_purchase, eligible)
+             VALUES (?,?,?,0)`,
+            [userId, threshold.id, totalSpent]
+          );
+        } else {
+          await db.query(
+            `UPDATE CustomerGiftHistory SET cumulative_purchase=?, eligible=0 WHERE id=?`,
+            [totalSpent, history[0].id]
+          );
+        }
+      }
+
+      progress.push({
+        threshold_id: threshold.id,
+        title: threshold.title,
+        description: threshold.description,
+        image_url: threshold.image_url,
+        required: threshold.threshold_amount,
+        spent: totalSpent,
+        eligible: totalSpent >= threshold.threshold_amount,
+        start_date: threshold.start_date,
+        end_date: threshold.end_date,
+        status: "active",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "User threshold check completed successfully.",
+      progress,
+    });
+  } catch (err) {
+    console.error("❌ Error in checkUserGiftThreshold:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+// Get all users who have any gift history
+exports.getAllUsersGiftProgress = async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        u.id AS user_id,
+        u.username,
+        u.email,
+        u.phone,
+        COALESCE(SUM(h.cumulative_purchase), 0) AS total_spent,
+        GROUP_CONCAT(
+          CASE WHEN h.eligible = 1 THEN gt.title ELSE NULL END
+        ) AS unlocked_gifts
+      FROM CustomerGiftHistory h
+      INNER JOIN users u ON u.id = h.user_id
+      LEFT JOIN GiftThreshold gt ON gt.id = h.gift_threshold_id
+      GROUP BY u.id, u.username, u.email, u.phone
+      ORDER BY total_spent DESC
+    `);
+
+    res.json({
+      success: true,
+      users: rows,
+    });
+  } catch (err) {
+    console.error("❌ Error in getAllUsersGiftProgress:", err);
+    res.status(500).json({ error: "Server error" });
+  }
 };

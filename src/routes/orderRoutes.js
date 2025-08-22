@@ -31,7 +31,7 @@ router.get(
 router.get(
   "/get-useridby-order",
   authenticate,
-   authorizeRoles('admin', 'super-admin'),
+   authorizeRoles('admin', 'super-admin','customer'),
   ...withEncryption(orderController.getUserIdByOrder)
 );
 router.get(

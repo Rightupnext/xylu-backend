@@ -10,5 +10,8 @@ router.get("/", giftController.giftThresholdController.get);
 // CREATE or UPDATE gift threshold
 router.post("/",   upload.single("image"),
   optimizeGiftImage, giftController.giftThresholdController.createOrUpdate);
+router.get("/check/:userId", giftController.checkUserGiftThreshold);
 
+// Get all users progress
+router.get("/progress", giftController.getAllUsersGiftProgress);
 module.exports = router;

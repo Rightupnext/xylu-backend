@@ -44,7 +44,7 @@ app.get("/", (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-const IP = "192.168.1.31";
+const IP = "192.168.1.8";
 // app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
 app.listen(5000, IP, () => {
   console.log(`Server running at http://${IP}:${PORT}/`);

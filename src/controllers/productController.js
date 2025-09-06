@@ -37,22 +37,22 @@ exports.createProductWithVariants = async (req, res) => {
     await connection.beginTransaction();
 
     const [productResult] = await connection.query(
-  `INSERT INTO boutique_inventory 
+      `INSERT INTO boutique_inventory 
    (product_name, product_code, category, description, image, price, discount, offerExpiry, trend, Bulk_discount) 
    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  [
-    product_name,
-    product_code,
-    category,
-    description,
-    image,
-    price,
-    discount,
-    JSON.stringify(offerExpiry),
-    trend,
-    Bulk_discount,
-  ]
-);
+      [
+        product_name,
+        product_code,
+        category,
+        description,
+        image,
+        price,
+        discount,
+        JSON.stringify(offerExpiry),
+        trend,
+        Bulk_discount,
+      ]
+    );
 
 
     const productId = productResult.insertId;
@@ -101,7 +101,6 @@ exports.updateProductWithVariants = async (req, res) => {
 
   const uploadDir = path.join(__dirname, "../../uploads/products");
   const newImage = req.imageFilename || null;
-
   let parsedVariants = [];
 
   const connection = await db.getConnection();
@@ -109,7 +108,7 @@ exports.updateProductWithVariants = async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // Step 1: Get current product data
+    // 1. Fetch old product details
     const [rows] = await connection.query(
       `SELECT image FROM boutique_inventory WHERE id = ?`,
       [id]
@@ -120,42 +119,77 @@ exports.updateProductWithVariants = async (req, res) => {
       return res.status(404).json({ message: "Product not found" });
     }
 
-    const oldImage = rows[0].image;
+    // Normalize old DB image (remove any "products/" prefix)
+    const oldImage = rows[0].image
+      ? rows[0].image.replace(/^products\//, "").trim()
+      : null;
+
     let finalImage = oldImage;
 
-    // console.log("📷 Old image from DB:", oldImage);
-    // console.log("📤 New uploaded image:", newImage);
-    // console.log("📝 Existing image from formData:", existingImage);
-
-    // Step 2: If a new image is uploaded
+    // 2. Handle image update logic
     if (newImage) {
-      // Delete the existing image from formData
-      if (existingImage) {
-        const cleanedExistingImage = existingImage
-          .replace(/^products\//, "")
-          .trim();
-        const existingImagePath = path.join(uploadDir, cleanedExistingImage);
-
-        if (fsSync.existsSync(existingImagePath)) {
-          await fs.unlink(existingImagePath);
-          // console.log(
-          //   "🗑 Deleted existing image from formData:",
-          //   cleanedExistingImage
-          // );
+      // Case A: new upload → delete old
+      if (oldImage) {
+        const oldImagePath = path.join(uploadDir, oldImage);
+        console.log("🔍 Trying to delete old image:", oldImagePath);
+        if (fsSync.existsSync(oldImagePath)) {
+          try {
+            await fs.unlink(oldImagePath);
+            console.log("🗑 Deleted old image:", oldImagePath);
+          } catch (err) {
+            console.warn("⚠️ Failed to delete old image:", err.message);
+          }
         } else {
-          console.warn("⚠️ Existing image not found:", cleanedExistingImage);
+          console.log("⚠️ Old image not found:", oldImagePath);
         }
       }
-
-      // Set final image to newly uploaded file
       finalImage = newImage;
+    } else if (existingImage) {
+      // Case B: frontend kept an existing image
+      const normalizedExisting = existingImage
+        .replace(/^products\//, "")
+        .trim();
+
+      if (oldImage && oldImage !== normalizedExisting) {
+        const oldImagePath = path.join(uploadDir, oldImage);
+        console.log("🔍 Trying to delete replaced image:", oldImagePath);
+        if (fsSync.existsSync(oldImagePath)) {
+          try {
+            await fs.unlink(oldImagePath);
+            console.log("🗑 Deleted replaced image:", oldImagePath);
+          } catch (err) {
+            console.warn("⚠️ Failed to delete replaced image:", err.message);
+          }
+        } else {
+          console.log("⚠️ Replaced image not found:", oldImagePath);
+        }
+      }
+      finalImage = normalizedExisting;
+    } else {
+      // Case C: nothing given → fallback to old
+      finalImage = oldImage;
     }
 
-    // Step 3: Update product info in DB
+    // 3. Normalize offerExpiry
+    let finalOfferExpiry = null;
+    if (offerExpiry) {
+      if (Array.isArray(offerExpiry)) {
+        finalOfferExpiry = JSON.stringify(offerExpiry);
+      } else if (typeof offerExpiry === "string") {
+        try {
+          JSON.parse(offerExpiry);
+          finalOfferExpiry = offerExpiry;
+        } catch {
+          finalOfferExpiry = JSON.stringify([offerExpiry]);
+        }
+      }
+    }
+
+    // 4. Update product info
     await connection.query(
       `UPDATE boutique_inventory 
        SET product_name = ?, product_code = ?, category = ?, description = ?, 
-           image = ?, price = ?, discount = ?, Bulk_discount = ?,offerExpiry = ?, trend = ?
+           image = ?, price = ?, discount = ?, Bulk_discount = ?, offerExpiry = ?, trend = ?
        WHERE id = ?`,
       [
         product_name,
@@ -166,15 +200,16 @@ exports.updateProductWithVariants = async (req, res) => {
         price,
         discount,
         Bulk_discount,
-        Array.isArray(offerExpiry) ? offerExpiry.join(",") : offerExpiry,
+        finalOfferExpiry,
         trend,
         id,
       ]
     );
 
-    // Step 4: Handle variants
+    // 5. Parse and update variants
     parsedVariants =
       typeof variants === "string" ? JSON.parse(variants) : variants;
+
     if (!Array.isArray(parsedVariants)) {
       throw new Error("Variants must be an array");
     }
@@ -186,19 +221,19 @@ exports.updateProductWithVariants = async (req, res) => {
     );
 
     // Insert new variants
-    const insertPromises = parsedVariants.map((variant) => {
+    for (const variant of parsedVariants) {
       const sizeString = Array.isArray(variant.size)
         ? variant.size.join(",")
         : String(variant.size);
 
-      return connection.query(
+      await connection.query(
         `INSERT INTO inventory_variants (product_id, color, size, quantity)
          VALUES (?, ?, ?, ?)`,
         [id, variant.color, sizeString, variant.quantity]
       );
-    });
+    }
 
-    await Promise.all(insertPromises);
+    // Commit transaction
     await connection.commit();
 
     res.json({

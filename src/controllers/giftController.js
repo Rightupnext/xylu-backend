@@ -153,6 +153,9 @@ exports.checkUserGiftThreshold = async (req, res) => {
   const { userId } = req.params;
 
   try {
+    if (!userId || isNaN(Number(userId))) {
+    return res.status(400).json({ error: "Invalid or missing userId" });
+  }
     const [thresholds] = await db.query(`SELECT * FROM GiftThreshold`);
     const now = new Date();
 

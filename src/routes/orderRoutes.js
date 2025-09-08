@@ -16,42 +16,42 @@ const withEncryption = (handler) =>
     : [handler];
 
 // Public routes without auth or encryption
-router.post("/create-order",authenticate,authorizeRoles('admin', 'super-admin','customer'),...withEncryption(orderController.createOrder));
-router.post("/confirm-order", authenticate,authorizeRoles('admin', 'super-admin','customer'),...withEncryption(orderController.confirmOrder));
+router.post("/create-order", authenticate, authorizeRoles('admin', 'super-admin', 'customer', 'D-partner'), ...withEncryption(orderController.createOrder));
+router.post("/confirm-order", authenticate, authorizeRoles('admin', 'super-admin', 'customer', 'D-partner'), ...withEncryption(orderController.confirmOrder));
 
 // Protected routes with conditional encryption and authentication
 
 router.get(
   "/get-all-order",
   authenticate,
-  authorizeRoles("admin"),
+  authorizeRoles("admin", 'D-partner'),
   ...withEncryption(orderController.getAllOrders)
 );
 
 router.get(
   "/get-useridby-order",
   authenticate,
-   authorizeRoles('admin', 'super-admin','customer'),
+  authorizeRoles('admin', 'super-admin', 'customer', 'D-partner'),
   ...withEncryption(orderController.getUserIdByOrder)
 );
 router.get(
   "/order-analytics",
   authenticate,
-   authorizeRoles('admin', 'super-admin'),
+  authorizeRoles('admin', 'super-admin', 'D-partner'),
   ...withEncryption(orderController.getOrderAnalytics)
 );
 
 router.put(
   "/admin-update-order/:orderId",
   authenticate,
-  authorizeRoles("admin"),
+  authorizeRoles("admin", 'D-partner'),
   ...withEncryption(orderController.updateOrder)
 );
 
 router.put(
   "/client-update-order/:orderId",
   authenticate,
-   authorizeRoles('admin', 'super-admin'),
+  authorizeRoles('admin', 'super-admin', 'D-partner'),
   ...withEncryption(orderController.clientUpdateOrderIssue)
 );
 

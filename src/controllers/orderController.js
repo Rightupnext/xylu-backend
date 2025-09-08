@@ -3,6 +3,7 @@ const db = require("../db");
 const crypto = require("crypto");
 require("dotenv").config();
 const Razorpay = require("razorpay");
+const { generateBarcodeForOrder } = require('./barcodeController');
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -91,6 +92,16 @@ exports.confirmOrder = async (req, res) => {
       WHERE razorpay_order_id = ?`,
       [razorpay_payment_id, razorpay_signature, otp, razorpay_order_id]
     );
+    const [rows] = await db.query(
+      `SELECT * FROM full_orders WHERE razorpay_order_id = ?`,
+      [razorpay_order_id]
+    );
+
+    if (rows.length > 0) {
+      const order = rows[0];
+      generateBarcodeForOrder(order) // don't await
+        .catch(err => console.error("Barcode generation failed:", err));
+    }
 
     res.json({ message: "Order confirmed and payment successful.", otp });
   } catch (err) {

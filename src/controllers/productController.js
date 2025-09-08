@@ -100,7 +100,7 @@ exports.updateProductWithVariants = async (req, res) => {
   } = req.body;
 
   const uploadDir = path.join(__dirname, "../../uploads/products");
-  const newImage = req.imageFilename || null;
+  const newImage = req.imageFilename || null; // multer saved filename
   let parsedVariants = [];
 
   const connection = await db.getConnection();

@@ -25,8 +25,9 @@ async function generateBarcodeForOrder(order) {
         // Include customer_id to make it unique per customer
         const uniqueCode = `${order.customer_id}-${order.id}-${item.id}-${item.selectedColor}-${item.selectedSize}-${i + 1}`;
         const barcodeFileName = `barcode_${uniqueCode}.png`;
-        const barcodePath = path.join(BARCODE_DIR, barcodeFileName);
+        const barcodePathAbsolute = path.join(BARCODE_DIR, barcodeFileName);
 
+        // Generate barcode image
         const buffer = await bwipjs.toBuffer({
           bcid: "code128",
           text: uniqueCode,
@@ -35,13 +36,15 @@ async function generateBarcodeForOrder(order) {
           includetext: true,
           textxalign: "center",
         });
+        fs.writeFileSync(barcodePathAbsolute, buffer);
 
-        fs.writeFileSync(barcodePath, buffer);
+        // Use relative path for DB
+        const barcodePathRelative = `uploads/barcodes/${barcodeFileName}`;
 
         await db.query(
           `INSERT INTO order_barcodes (order_id, customer_id, product_id, product_code, barcode_image_path)
            VALUES (?, ?, ?, ?, ?)`,
-          [order.id, order.customer_id, item.id, uniqueCode, barcodePath]
+          [order.id, order.customer_id, item.id, uniqueCode, barcodePathRelative]
         );
 
         allBarcodes.push({
@@ -50,7 +53,7 @@ async function generateBarcodeForOrder(order) {
           selectedSize: item.selectedSize,
           selectedColor: item.selectedColor,
           barcode_text: uniqueCode,
-          barcode_image_path: barcodePath
+          barcode_image_path: barcodePathRelative
         });
       }
     }

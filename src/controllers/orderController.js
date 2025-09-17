@@ -82,16 +82,16 @@ exports.confirmOrder = async (req, res) => {
 
     // Step 3: Update the order with payment details and OTP
     await db.query(
-      `
-      UPDATE full_orders
-      SET 
-        razorpay_payment_id = ?, 
-        razorpay_signature = ?, 
-        razor_payment = 'done',
-        otp = ?
-      WHERE razorpay_order_id = ?`,
+      `UPDATE full_orders
+       SET razorpay_payment_id = ?, 
+           razorpay_signature = ?, 
+           razor_payment = 'done',
+           otp = ?
+       WHERE razorpay_order_id = ?`,
       [razorpay_payment_id, razorpay_signature, otp, razorpay_order_id]
     );
+
+    // Step 4: Fetch order
     const [rows] = await db.query(
       `SELECT * FROM full_orders WHERE razorpay_order_id = ?`,
       [razorpay_order_id]
@@ -99,16 +99,30 @@ exports.confirmOrder = async (req, res) => {
 
     if (rows.length > 0) {
       const order = rows[0];
-      generateBarcodeForOrder(order) // don't await
-        .catch(err => console.error("Barcode generation failed:", err));
+
+      // Generate barcodes and get array of objects
+      const barcodes = await generateBarcodeForOrder(order);
+
+      // Extract product codes for JSON column
+      const barcodeCodes = barcodes.map(b => b.barcode_text);
+
+      // Update full_orders.Barcode JSON column
+      await db.query(
+        `UPDATE full_orders SET Barcode = ? WHERE id = ?`,
+        [JSON.stringify(barcodeCodes), order.id]
+      );
     }
 
-    res.json({ message: "Order confirmed and payment successful.", otp });
+    res.json({
+      message: "Order confirmed, payment successful, and barcodes saved.",
+      otp,
+    });
   } catch (err) {
     console.error("Confirm Order Error:", err);
     res.status(500).json({ error: "Failed to confirm order" });
   }
 };
+
 
 // Update Order
 exports.updateOrder = async (req, res) => {

@@ -41,6 +41,10 @@ app.use(
   "/uploads/gifts",
   express.static(path.join(__dirname, "uploads/gifts")) // ✅ FIXED
 );
+app.use(
+  "/uploads/barcodes",
+  express.static(path.join(__dirname, "uploads/barcodes")) // ✅ FIXED
+);
 app.get("/", (req, res) => {
   res.send("API Running...");
 });

@@ -40,7 +40,7 @@ exports.getAllDeliveryPartners = async (req, res) => {
       return res.json([]);
     }
 
-    // 2) collect partner names & phones and any order_ids already stored in Deivery_Products
+    // 2) collect order_ids & partner names/phones
     const partnerNames = [];
     const partnerPhones = [];
     let orderIds = [];
@@ -51,22 +51,22 @@ exports.getAllDeliveryPartners = async (req, res) => {
 
       if (p.Deivery_Products) {
         try {
-          const arr = typeof p.Deivery_Products === "string" ? JSON.parse(p.Deivery_Products) : p.Deivery_Products;
+          const arr =
+            typeof p.Deivery_Products === "string"
+              ? JSON.parse(p.Deivery_Products)
+              : p.Deivery_Products;
           if (Array.isArray(arr)) {
-            arr.forEach(item => {
+            arr.forEach((item) => {
               if (item && item.order_id) orderIds.push(item.order_id);
             });
           }
-        } catch (e) {
-          // ignore malformed JSON for now
-        }
+        } catch (e) {}
       }
     });
 
-    // dedupe orderIds
     orderIds = Array.from(new Set(orderIds));
 
-    // 3) build SQL to fetch related full_orders (by deliveryman_name / phone OR by explicit order ids)
+    // 3) fetch related full_orders
     const whereClauses = [];
     const params = [];
 
@@ -83,35 +83,77 @@ exports.getAllDeliveryPartners = async (req, res) => {
       params.push(orderIds);
     }
 
-    const whereSQL = whereClauses.length ? `WHERE ${whereClauses.join(" OR ")}` : "";
+    const whereSQL = whereClauses.length
+      ? `WHERE ${whereClauses.join(" OR ")}`
+      : "";
 
-    // fetch matching orders (cart_items may be JSON in DB)
-    const [orders] = await pool.query(`SELECT * FROM full_orders ${whereSQL}`, params);
+    const [orders] = await pool.query(
+      `SELECT * FROM full_orders ${whereSQL}`,
+      params
+    );
 
-    // normalize cart_items and map orders by id
+    // normalize cart_items
     const orderMap = {};
     orders.forEach((o) => {
       if (o.cart_items && typeof o.cart_items === "string") {
-        try { o.cart_items = JSON.parse(o.cart_items); } catch { o.cart_items = []; }
+        try {
+          o.cart_items = JSON.parse(o.cart_items);
+        } catch {
+          o.cart_items = [];
+        }
       }
       orderMap[o.id] = o;
     });
 
-    // 4) enrich partners
+    // 4) fetch barcodes for these orders
+    const barcodeOrderIds = orders.map((o) => o.id);
+    let barcodeMap = {};
+    if (barcodeOrderIds.length > 0) {
+      const [barcodes] = await pool.query(
+        `SELECT * FROM order_barcodes WHERE order_id IN (?)`,
+        [barcodeOrderIds]
+      );
+
+      // group by composite key: customer_id-order_id-product_id-selectedColor-selectedSize-index
+      barcodeMap = {};
+      barcodes.forEach((b) => {
+        const key = [
+          b.customer_id,
+          b.order_id,
+          b.product_id,
+          b.selectedColor || "",
+          b.selectedSize || "",
+          b.idx || b.index || 0, // handle both idx/index naming
+        ].join("_");
+
+        if (!barcodeMap[key]) barcodeMap[key] = [];
+        barcodeMap[key].push(b);
+      });
+    }
+
+    // 5) enrich partners
     const enrichedPartners = partners.map((partner) => {
-      // parse existing Deivery_Products safely
       let existing = [];
       if (partner.Deivery_Products) {
-        try { existing = typeof partner.Deivery_Products === "string" ? JSON.parse(partner.Deivery_Products) : partner.Deivery_Products; } catch { existing = []; }
+        try {
+          existing =
+            typeof partner.Deivery_Products === "string"
+              ? JSON.parse(partner.Deivery_Products)
+              : partner.Deivery_Products;
+        } catch {
+          existing = [];
+        }
       }
       if (!Array.isArray(existing)) existing = [];
 
-      // enrich any existing items using orderMap
+      // enrich existing products
       const enrichedExisting = existing.map((prod) => {
         const matchedOrder = orderMap[prod.order_id];
+        let enrichedProd = { ...prod };
+
         if (matchedOrder) {
-          return {
-            ...prod,
+          enrichedProd = {
+            ...enrichedProd,
             order_status: matchedOrder.order_status,
             customer_name: matchedOrder.customer_name,
             customer_phone: matchedOrder.customer_phone,
@@ -119,39 +161,78 @@ exports.getAllDeliveryPartners = async (req, res) => {
             customer_address: matchedOrder.customer_address,
           };
         }
-        return prod;
+
+        // attach barcodes by composite key
+        const key = [
+          prod.customer_id,
+          prod.order_id,
+          prod.product_id,
+          prod.selectedColor || "",
+          prod.selectedSize || "",
+          prod.index || 0,
+        ].join("_");
+
+        if (barcodeMap[key]) {
+          enrichedProd.barcodes = barcodeMap[key].map((b) => ({
+            product_code: b.product_code,
+            barcode_image_path: b.barcode_image_path,
+          }));
+        }
+
+        return enrichedProd;
       });
 
-      // if there were no existing products, derive from full_orders assigned to this partner
+      // derive products if empty
       if (enrichedExisting.length === 0) {
-        // find orders that match this partner by name or phone
-        const matchedOrders = orders.filter(o =>
-          o.deliveryman_name === partner.d_partner_name || o.deliveryman_phone === partner.phone
+        const matchedOrders = orders.filter(
+          (o) =>
+            o.deliveryman_name === partner.d_partner_name ||
+            o.deliveryman_phone === partner.phone
         );
 
         matchedOrders.forEach((o) => {
           const cartItems = Array.isArray(o.cart_items) ? o.cart_items : [];
-          // convert each cart_item to the Deivery_Products shape (one entry per cart item)
-          cartItems.forEach(ci => {
-            enrichedExisting.push({
+          cartItems.forEach((ci, idx) => {
+            const prod = {
               order_id: o.id,
               cart_items: [ci],
               product_id: ci.product_id || null,
               customer_id: o.customer_id,
               product_code: ci.product_code || null,
+              selectedColor: ci.selectedColor || "",
+              selectedSize: ci.selectedSize || "",
+              index: idx,
               deliveryman_name: o.deliveryman_name || partner.d_partner_name,
               deliveryman_phone: o.deliveryman_phone || partner.phone,
               order_status: o.order_status,
               customer_name: o.customer_name,
               customer_phone: o.customer_phone,
               customer_email: o.customer_email,
-              customer_address: o.customer_address
-            });
+              customer_address: o.customer_address,
+            };
+
+            // attach barcodes using composite key
+            const key = [
+              o.customer_id,
+              o.id,
+              ci.product_id,
+              ci.selectedColor || "",
+              ci.selectedSize || "",
+              idx,
+            ].join("_");
+
+            if (barcodeMap[key]) {
+              prod.barcodes = barcodeMap[key].map((b) => ({
+                product_code: b.product_code,
+                barcode_image_path: b.barcode_image_path,
+              }));
+            }
+
+            enrichedExisting.push(prod);
           });
         });
       }
 
-      // final partner object with Deivery_Products enriched or derived
       return {
         ...partner,
         Deivery_Products: enrichedExisting,

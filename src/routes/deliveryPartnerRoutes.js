@@ -27,5 +27,7 @@ router.put("/:id", authenticate,
 router.delete("/:id", authenticate,
     authorizeRoles('admin', 'super-admin', 'customer','D-partner'),
     ...withEncryption(deliveryPartnerController.deleteDeliveryPartner));
-
+router.post("/add-product-d-partner-wise/:partnerId", authenticate,
+    authorizeRoles('admin', 'super-admin', 'customer','D-partner'),
+    ...withEncryption(deliveryPartnerController.AddDeliveryProducts_D_Partner_Wise));
 module.exports = router;

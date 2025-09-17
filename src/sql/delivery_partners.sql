@@ -8,7 +8,7 @@ CREATE TABLE delivery_partners (
   zone VARCHAR(100),
   user_id INT,
   Count INT,
-  Products JSON,
+  Deivery_Products JSON,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 

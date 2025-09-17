@@ -29,18 +29,16 @@ exports.createDeliveryPartner = async (req, res) => {
 // Get All Delivery Partners with enriched/derived Deivery_Products
 exports.getAllDeliveryPartners = async (req, res) => {
   try {
-    // 1) fetch partners + user info
+    // 1) Fetch partners + user info
     const [partners] = await pool.query(
       `SELECT dp.*, u.username, u.role 
        FROM delivery_partners dp
        JOIN users u ON dp.user_id = u.id`
     );
 
-    if (!partners || partners.length === 0) {
-      return res.json([]);
-    }
+    if (!partners || partners.length === 0) return res.json([]);
 
-    // 2) collect order_ids & partner names/phones
+    // 2) Collect order_ids & partner names/phones
     const partnerNames = [];
     const partnerPhones = [];
     let orderIds = [];
@@ -51,22 +49,21 @@ exports.getAllDeliveryPartners = async (req, res) => {
 
       if (p.Deivery_Products) {
         try {
-          const arr =
-            typeof p.Deivery_Products === "string"
-              ? JSON.parse(p.Deivery_Products)
-              : p.Deivery_Products;
+          const arr = typeof p.Deivery_Products === "string"
+            ? JSON.parse(p.Deivery_Products)
+            : p.Deivery_Products;
           if (Array.isArray(arr)) {
             arr.forEach((item) => {
               if (item && item.order_id) orderIds.push(item.order_id);
             });
           }
-        } catch (e) { }
+        } catch {}
       }
     });
 
     orderIds = Array.from(new Set(orderIds));
 
-    // 3) fetch related full_orders
+    // 3) Fetch related full_orders
     const whereClauses = [];
     const params = [];
 
@@ -83,29 +80,20 @@ exports.getAllDeliveryPartners = async (req, res) => {
       params.push(orderIds);
     }
 
-    const whereSQL = whereClauses.length
-      ? `WHERE ${whereClauses.join(" OR ")}`
-      : "";
+    const whereSQL = whereClauses.length ? `WHERE ${whereClauses.join(" OR ")}` : "";
 
-    const [orders] = await pool.query(
-      `SELECT * FROM full_orders ${whereSQL}`,
-      params
-    );
+    const [orders] = await pool.query(`SELECT * FROM full_orders ${whereSQL}`, params);
 
-    // normalize cart_items
+    // 4) Normalize cart_items and map orders
     const orderMap = {};
     orders.forEach((o) => {
       if (o.cart_items && typeof o.cart_items === "string") {
-        try {
-          o.cart_items = JSON.parse(o.cart_items);
-        } catch {
-          o.cart_items = [];
-        }
+        try { o.cart_items = JSON.parse(o.cart_items); } catch { o.cart_items = []; }
       }
       orderMap[o.id] = o;
     });
 
-    // 4) fetch barcodes for these orders
+    // 5) Fetch barcodes for these orders
     const barcodeOrderIds = orders.map((o) => o.id);
     let barcodeMap = {};
     if (barcodeOrderIds.length > 0) {
@@ -114,7 +102,7 @@ exports.getAllDeliveryPartners = async (req, res) => {
         [barcodeOrderIds]
       );
 
-      // group by composite key: customer_id-order_id-product_id-selectedColor-selectedSize-index
+      // group by composite key: customer_id-order_id-product_id-selectedColor-selectedSize
       barcodeMap = {};
       barcodes.forEach((b) => {
         const key = [
@@ -122,8 +110,7 @@ exports.getAllDeliveryPartners = async (req, res) => {
           b.order_id,
           b.product_id,
           b.selectedColor || "",
-          b.selectedSize || "",
-          b.idx || b.index || 0, // handle both idx/index naming
+          b.selectedSize || ""
         ].join("_");
 
         if (!barcodeMap[key]) barcodeMap[key] = [];
@@ -131,22 +118,18 @@ exports.getAllDeliveryPartners = async (req, res) => {
       });
     }
 
-    // 5) enrich partners
+    // 6) Enrich partners
     const enrichedPartners = partners.map((partner) => {
       let existing = [];
       if (partner.Deivery_Products) {
         try {
-          existing =
-            typeof partner.Deivery_Products === "string"
-              ? JSON.parse(partner.Deivery_Products)
-              : partner.Deivery_Products;
-        } catch {
-          existing = [];
-        }
+          existing = typeof partner.Deivery_Products === "string"
+            ? JSON.parse(partner.Deivery_Products)
+            : partner.Deivery_Products;
+        } catch { existing = []; }
       }
       if (!Array.isArray(existing)) existing = [];
 
-      // enrich existing products
       const enrichedExisting = existing.map((prod) => {
         const matchedOrder = orderMap[prod.order_id];
         let enrichedProd = { ...prod };
@@ -162,14 +145,13 @@ exports.getAllDeliveryPartners = async (req, res) => {
           };
         }
 
-        // attach barcodes by composite key
+        // Attach barcodes using composite key
         const key = [
           prod.customer_id,
           prod.order_id,
           prod.product_id,
           prod.selectedColor || "",
-          prod.selectedSize || "",
-          prod.index || 0,
+          prod.selectedSize || ""
         ].join("_");
 
         if (barcodeMap[key]) {
@@ -182,12 +164,10 @@ exports.getAllDeliveryPartners = async (req, res) => {
         return enrichedProd;
       });
 
-      // derive products if empty
+      // 7) If partner has no existing products, derive from full_orders
       if (enrichedExisting.length === 0) {
         const matchedOrders = orders.filter(
-          (o) =>
-            o.deliveryman_name === partner.d_partner_name ||
-            o.deliveryman_phone === partner.phone
+          (o) => o.deliveryman_name === partner.d_partner_name || o.deliveryman_phone === partner.phone
         );
 
         matchedOrders.forEach((o) => {
@@ -211,14 +191,12 @@ exports.getAllDeliveryPartners = async (req, res) => {
               customer_address: o.customer_address,
             };
 
-            // attach barcodes using composite key
             const key = [
               o.customer_id,
               o.id,
               ci.product_id,
               ci.selectedColor || "",
-              ci.selectedSize || "",
-              idx,
+              ci.selectedSize || ""
             ].join("_");
 
             if (barcodeMap[key]) {
@@ -240,11 +218,13 @@ exports.getAllDeliveryPartners = async (req, res) => {
     });
 
     return res.json(enrichedPartners);
+
   } catch (error) {
     console.error("Error fetching delivery partners:", error);
     return res.status(500).json({ error: "Failed to fetch delivery partners" });
   }
 };
+
 
 // ✅ Update Delivery Partner by ID
 exports.updateDeliveryPartner = async (req, res) => {

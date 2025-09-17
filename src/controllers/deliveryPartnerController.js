@@ -6,7 +6,7 @@ exports.createDeliveryPartner = async (req, res) => {
     const { d_partner_name, email, phone, address, district, zone } = req.body;
 
     // user_id comes from auth middleware (req.user)
-    const userId = req.user?.id;  
+    const userId = req.user?.id;
 
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized: user not logged in" });
@@ -60,7 +60,7 @@ exports.getAllDeliveryPartners = async (req, res) => {
               if (item && item.order_id) orderIds.push(item.order_id);
             });
           }
-        } catch (e) {}
+        } catch (e) { }
       }
     });
 
@@ -358,8 +358,55 @@ exports.AddDeliveryProducts_D_Partner_Wise = async (req, res) => {
       }
     }
 
-    // Append shipped orders to current products
-    currentProducts.push(...shippedProducts);
+    // Flatten existing items for duplicate checking
+    const existingItems = currentProducts.flatMap(order =>
+      order.cart_items?.map(ci => ({
+        customer_id: order.customer_id,
+        order_id: order.order_id,
+        product_id: order.product_id,
+        selectedColor: ci.selectedColor,
+        selectedSize: ci.selectedSize,
+        index: ci.index
+      })) || []
+    );
+
+    // Collect duplicates in barcode-like format
+    const duplicates = [];
+
+    // Filter shippedProducts to exclude exact duplicates
+    const filteredNewProducts = shippedProducts.filter(newOrder => {
+      const isDuplicate = newOrder.cart_items.some(ci =>
+        existingItems.some(exItem => {
+          const match =
+            exItem.customer_id === newOrder.customer_id &&
+            exItem.order_id === newOrder.order_id &&
+            exItem.product_id === newOrder.product_id &&
+            exItem.selectedColor === ci.selectedColor &&
+            exItem.selectedSize === ci.selectedSize &&
+            exItem.index === ci.index;
+
+          if (match) {
+            duplicates.push(`${exItem.customer_id}-${exItem.order_id}-${exItem.product_id}-${exItem.selectedColor}-${exItem.selectedSize}-${exItem.index}`);
+          }
+
+          return match;
+        })
+      );
+
+      return !isDuplicate; // keep only non-duplicates
+    });
+
+    if (filteredNewProducts.length === 0) {
+      const dupMessage = duplicates.join("; ");
+      return res.status(400).json({
+        status: "error",
+        message: `${dupMessage} - are already saved. Nothing added.`
+      });
+    }
+
+
+    // Append filtered new products
+    currentProducts.push(...filteredNewProducts);
 
     // Update Count field — total number of products assigned
     const newCount = currentProducts.length;
@@ -376,6 +423,7 @@ exports.AddDeliveryProducts_D_Partner_Wise = async (req, res) => {
       count: newCount,
       data: currentProducts,
     });
+
   } catch (error) {
     console.error("Error saving delivery products:", error);
     res.status(500).json({
@@ -385,3 +433,4 @@ exports.AddDeliveryProducts_D_Partner_Wise = async (req, res) => {
     });
   }
 };
+

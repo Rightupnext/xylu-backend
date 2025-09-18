@@ -25,6 +25,7 @@ CREATE TABLE full_orders (
   Barcode JSON,
   -- Delivery & Issue Info
   order_status ENUM('pending', 'packed', 'shipped', 'delivered','received','damaged','returned' ,'order-cancelled') DEFAULT 'pending',
+  total_quantity: INT NOT NULL,
   deliveryman_name TEXT,
   deliveryman_phone TEXT,
   issue_type ENUM('damaged', 'wrong-item-received', 'other','return') DEFAULT NULL,

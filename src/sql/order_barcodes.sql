@@ -5,6 +5,7 @@ CREATE TABLE order_barcodes (
     product_id INT NOT NULL,
     product_code VARCHAR(50),
     barcode_image_path VARCHAR(255),
+    status ENUM('received','damaged','returned','delivered'),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (order_id) REFERENCES full_orders(id)
 );

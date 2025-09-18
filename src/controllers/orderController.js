@@ -266,12 +266,51 @@ exports.clientUpdateOrderIssue = async (req, res) => {
 
 exports.getAllOrders = async (req, res) => {
   try {
+    // 1️⃣ Get all orders with user info
     const [orders] = await db.query(`
       SELECT fo.*, u.username, u.email
       FROM full_orders fo
       JOIN users u ON fo.customer_id = u.id
       ORDER BY fo.id DESC
     `);
+
+    // 2️⃣ Loop through each order
+    for (const order of orders) {
+      // Parse cart_items JSON if stored as string
+      const cartItems = Array.isArray(order.cart_items)
+        ? order.cart_items
+        : JSON.parse(order.cart_items || "[]");
+
+      const barcodeArray = Array.isArray(order.Barcode)
+        ? order.Barcode
+        : JSON.parse(order.Barcode || "[]");
+
+      if (barcodeArray.length > 0) {
+        // 3️⃣ Fetch all barcodes for this order from order_barcodes table
+        const [orderBarcodes] = await db.query(
+          `SELECT product_code, barcode_image_path FROM order_barcodes WHERE order_id = ?`,
+          [order.id]
+        );
+
+        // 4️⃣ Attach correct barcode_image_path to each cart item
+        order.cart_items = cartItems.map(item => {
+          // Find the barcode that matches selected product variant
+          const matchedBarcode = orderBarcodes.find(b => 
+            barcodeArray.includes(b.product_code) &&
+            b.product_code.includes(item.selectedColor) &&
+            b.product_code.includes(item.selectedSize)
+          );
+
+          return {
+            ...item,
+            barcode_image_path: matchedBarcode ? matchedBarcode.barcode_image_path : null
+          };
+        });
+      } else {
+        // If no barcode, return cart items as is
+        order.cart_items = cartItems;
+      }
+    }
 
     res.json(orders);
   } catch (error) {

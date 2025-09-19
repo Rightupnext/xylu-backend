@@ -38,7 +38,7 @@ exports.getAllDeliveryPartners = async (req, res) => {
 
     if (!partners || partners.length === 0) return res.json([]);
 
-    // 2) Collect partner names, phones, and order_ids
+    // 2) Collect partner names, phones, order_ids, and barcode_product_codes
     const partnerNames = [];
     const partnerPhones = [];
     let orderIds = [];
@@ -102,17 +102,15 @@ exports.getAllDeliveryPartners = async (req, res) => {
       orderMap[o.id] = o;
     });
 
-    // 5) Fetch barcodes (either by product_code or order_id)
-    let barcodeMap = {};
-    if (barcodeProductCodes.length > 0) {
-      const [barcodes] = await pool.query(
-        `SELECT * FROM order_barcodes WHERE product_code IN (?)`,
-        [barcodeProductCodes]
-      );
-      barcodes.forEach((b) => {
-        barcodeMap[b.product_code] = b;
-      });
-    }
+    // 5) Fetch all order_barcodes to map barcode_product_code -> current status/image
+    const [barcodes] = await pool.query(`SELECT * FROM order_barcodes`);
+
+    const barcodeMap = {};
+    barcodes.forEach((b) => {
+      if (b.product_code) {
+        barcodeMap[b.product_code] = b; // includes barcode_status & barcode_image_path
+      }
+    });
 
     // 6) Enrich partners → products → cart_items
     const enrichedPartners = partners.map((partner) => {
@@ -142,12 +140,12 @@ exports.getAllDeliveryPartners = async (req, res) => {
           };
         }
 
-        // enrich each cart_item with barcode status/image
+        // enrich each cart_item with barcode status/image from order_barcodes
         const enrichedCartItems = (prod.cart_items || []).map((ci) => {
           if (ci.barcode_product_code && barcodeMap[ci.barcode_product_code]) {
             return {
               ...ci,
-              barcode_status: barcodeMap[ci.barcode_product_code].barcode_status,
+              barcode_status: barcodeMap[ci.barcode_product_code].barcode_status || ci.order_status,
               barcode_image_path: barcodeMap[ci.barcode_product_code].barcode_image_path,
             };
           }
@@ -173,6 +171,7 @@ exports.getAllDeliveryPartners = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch delivery partners" });
   }
 };
+
 
 
 
@@ -366,8 +365,6 @@ exports.AddDeliveryProducts_D_Partner_Wise = async (req, res) => {
 };
 
 exports.deletePartnerByBarcode = async (req, res) => {
-  console.log("DELETE req.body:", req.body);
-
   const { id, barcode_product_code } = req.body;
 
   if (!id || !barcode_product_code) {
@@ -379,7 +376,7 @@ exports.deletePartnerByBarcode = async (req, res) => {
 
     // 1. Get partner by ID
     const [rows] = await pool.query(
-      `SELECT id, Deivery_Products FROM delivery_partners WHERE id = ?`,
+      `SELECT id, Deivery_Products, Count FROM delivery_partners WHERE id = ?`,
       [partnerId]
     );
 
@@ -388,40 +385,41 @@ exports.deletePartnerByBarcode = async (req, res) => {
     }
 
     const partner = rows[0];
-
-    // 2. Deivery_Products is already a JS object (JSON column), no need to JSON.parse
     let deiveryProducts = partner.Deivery_Products || [];
+    let currentCount = partner.Count || 0;
 
-    // 3. Remove cart items that match the barcode_product_code
+    // 2. Remove cart items that match the barcode_product_code & count removed items
+    let removedItemsCount = 0;
     let updatedProducts = deiveryProducts.map((order) => {
+      const originalLength = (order.cart_items || []).length;
       const updatedCartItems = (order.cart_items || []).filter(
         (item) => item.barcode_product_code !== barcode_product_code
       );
-      return {
-        ...order,
-        cart_items: updatedCartItems,
-      };
+      removedItemsCount += originalLength - updatedCartItems.length;
+      return { ...order, cart_items: updatedCartItems };
     });
 
-    // 4. Remove orders that now have no cart_items
+    // 3. Remove orders that now have no cart_items
     updatedProducts = updatedProducts.filter((order) => order.cart_items.length > 0);
 
-    // 5. Update DB
+    // 4. Update DB with new Deivery_Products and reduce Count
+    const newCount = currentCount - removedItemsCount;
     await pool.query(
-      `UPDATE delivery_partners SET Deivery_Products = ? WHERE id = ?`,
-      [JSON.stringify(updatedProducts), partnerId]
+      `UPDATE delivery_partners SET Deivery_Products = ?, Count = ? WHERE id = ?`,
+      [JSON.stringify(updatedProducts), newCount, partnerId]
     );
 
     return res.json({
       message: "Cart item removed successfully",
       id: partnerId,
       barcode_product_code,
+      removedItemsCount,
+      newCount,
     });
   } catch (error) {
     console.error("deletePartnerByBarcode error:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };
-
 
 

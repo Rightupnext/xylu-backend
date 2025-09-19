@@ -29,7 +29,7 @@ exports.createDeliveryPartner = async (req, res) => {
 // Get All Delivery Partners with enriched/derived Deivery_Products
 exports.getAllDeliveryPartners = async (req, res) => {
   try {
-    // 1) Fetch partners + user info
+    // 1) Fetch all delivery partners with user info
     const [partners] = await pool.query(
       `SELECT dp.*, u.username, u.role 
        FROM delivery_partners dp
@@ -38,10 +38,11 @@ exports.getAllDeliveryPartners = async (req, res) => {
 
     if (!partners || partners.length === 0) return res.json([]);
 
-    // 2) Collect order_ids & partner names/phones
+    // 2) Collect partner names, phones, and order_ids
     const partnerNames = [];
     const partnerPhones = [];
     let orderIds = [];
+    let barcodeProductCodes = [];
 
     partners.forEach((p) => {
       if (p.d_partner_name) partnerNames.push(p.d_partner_name);
@@ -52,9 +53,18 @@ exports.getAllDeliveryPartners = async (req, res) => {
           const arr = typeof p.Deivery_Products === "string"
             ? JSON.parse(p.Deivery_Products)
             : p.Deivery_Products;
+
           if (Array.isArray(arr)) {
-            arr.forEach((item) => {
-              if (item && item.order_id) orderIds.push(item.order_id);
+            arr.forEach((prod) => {
+              if (prod.order_id) orderIds.push(prod.order_id);
+
+              if (prod.cart_items && Array.isArray(prod.cart_items)) {
+                prod.cart_items.forEach((ci) => {
+                  if (ci.barcode_product_code) {
+                    barcodeProductCodes.push(ci.barcode_product_code);
+                  }
+                });
+              }
             });
           }
         } catch {}
@@ -81,7 +91,6 @@ exports.getAllDeliveryPartners = async (req, res) => {
     }
 
     const whereSQL = whereClauses.length ? `WHERE ${whereClauses.join(" OR ")}` : "";
-
     const [orders] = await pool.query(`SELECT * FROM full_orders ${whereSQL}`, params);
 
     // 4) Normalize cart_items and map orders
@@ -93,32 +102,19 @@ exports.getAllDeliveryPartners = async (req, res) => {
       orderMap[o.id] = o;
     });
 
-    // 5) Fetch barcodes for these orders
-    const barcodeOrderIds = orders.map((o) => o.id);
+    // 5) Fetch barcodes (either by product_code or order_id)
     let barcodeMap = {};
-    if (barcodeOrderIds.length > 0) {
+    if (barcodeProductCodes.length > 0) {
       const [barcodes] = await pool.query(
-        `SELECT * FROM order_barcodes WHERE order_id IN (?)`,
-        [barcodeOrderIds]
+        `SELECT * FROM order_barcodes WHERE product_code IN (?)`,
+        [barcodeProductCodes]
       );
-
-      // group by composite key: customer_id-order_id-product_id-selectedColor-selectedSize
-      barcodeMap = {};
       barcodes.forEach((b) => {
-        const key = [
-          b.customer_id,
-          b.order_id,
-          b.product_id,
-          b.selectedColor || "",
-          b.selectedSize || ""
-        ].join("_");
-
-        if (!barcodeMap[key]) barcodeMap[key] = [];
-        barcodeMap[key].push(b);
+        barcodeMap[b.product_code] = b;
       });
     }
 
-    // 6) Enrich partners
+    // 6) Enrich partners → products → cart_items
     const enrichedPartners = partners.map((partner) => {
       let existing = [];
       if (partner.Deivery_Products) {
@@ -130,10 +126,11 @@ exports.getAllDeliveryPartners = async (req, res) => {
       }
       if (!Array.isArray(existing)) existing = [];
 
-      const enrichedExisting = existing.map((prod) => {
+      const enrichedProducts = existing.map((prod) => {
         const matchedOrder = orderMap[prod.order_id];
         let enrichedProd = { ...prod };
 
+        // attach customer/order info
         if (matchedOrder) {
           enrichedProd = {
             ...enrichedProd,
@@ -145,75 +142,27 @@ exports.getAllDeliveryPartners = async (req, res) => {
           };
         }
 
-        // Attach barcodes using composite key
-        const key = [
-          prod.customer_id,
-          prod.order_id,
-          prod.product_id,
-          prod.selectedColor || "",
-          prod.selectedSize || ""
-        ].join("_");
-
-        if (barcodeMap[key]) {
-          enrichedProd.barcodes = barcodeMap[key].map((b) => ({
-            product_code: b.product_code,
-            barcode_image_path: b.barcode_image_path,
-          }));
-        }
-
-        return enrichedProd;
-      });
-
-      // 7) If partner has no existing products, derive from full_orders
-      if (enrichedExisting.length === 0) {
-        const matchedOrders = orders.filter(
-          (o) => o.deliveryman_name === partner.d_partner_name || o.deliveryman_phone === partner.phone
-        );
-
-        matchedOrders.forEach((o) => {
-          const cartItems = Array.isArray(o.cart_items) ? o.cart_items : [];
-          cartItems.forEach((ci, idx) => {
-            const prod = {
-              order_id: o.id,
-              cart_items: [ci],
-              product_id: ci.product_id || null,
-              customer_id: o.customer_id,
-              product_code: ci.product_code || null,
-              selectedColor: ci.selectedColor || "",
-              selectedSize: ci.selectedSize || "",
-              index: idx,
-              deliveryman_name: o.deliveryman_name || partner.d_partner_name,
-              deliveryman_phone: o.deliveryman_phone || partner.phone,
-              order_status: o.order_status,
-              customer_name: o.customer_name,
-              customer_phone: o.customer_phone,
-              customer_email: o.customer_email,
-              customer_address: o.customer_address,
+        // enrich each cart_item with barcode status/image
+        const enrichedCartItems = (prod.cart_items || []).map((ci) => {
+          if (ci.barcode_product_code && barcodeMap[ci.barcode_product_code]) {
+            return {
+              ...ci,
+              barcode_status: barcodeMap[ci.barcode_product_code].barcode_status,
+              barcode_image_path: barcodeMap[ci.barcode_product_code].barcode_image_path,
             };
-
-            const key = [
-              o.customer_id,
-              o.id,
-              ci.product_id,
-              ci.selectedColor || "",
-              ci.selectedSize || ""
-            ].join("_");
-
-            if (barcodeMap[key]) {
-              prod.barcodes = barcodeMap[key].map((b) => ({
-                product_code: b.product_code,
-                barcode_image_path: b.barcode_image_path,
-              }));
-            }
-
-            enrichedExisting.push(prod);
-          });
+          }
+          return ci;
         });
-      }
+
+        return {
+          ...enrichedProd,
+          cart_items: enrichedCartItems
+        };
+      });
 
       return {
         ...partner,
-        Deivery_Products: enrichedExisting,
+        Deivery_Products: enrichedProducts
       };
     });
 
@@ -224,6 +173,8 @@ exports.getAllDeliveryPartners = async (req, res) => {
     return res.status(500).json({ error: "Failed to fetch delivery partners" });
   }
 };
+
+
 
 
 // ✅ Update Delivery Partner by ID
@@ -413,4 +364,64 @@ exports.AddDeliveryProducts_D_Partner_Wise = async (req, res) => {
     });
   }
 };
+
+exports.deletePartnerByBarcode = async (req, res) => {
+  console.log("DELETE req.body:", req.body);
+
+  const { id, barcode_product_code } = req.body;
+
+  if (!id || !barcode_product_code) {
+    return res.status(400).json({ message: "id and barcode_product_code are required" });
+  }
+
+  try {
+    const partnerId = Number(id);
+
+    // 1. Get partner by ID
+    const [rows] = await pool.query(
+      `SELECT id, Deivery_Products FROM delivery_partners WHERE id = ?`,
+      [partnerId]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ message: "Delivery partner not found" });
+    }
+
+    const partner = rows[0];
+
+    // 2. Deivery_Products is already a JS object (JSON column), no need to JSON.parse
+    let deiveryProducts = partner.Deivery_Products || [];
+
+    // 3. Remove cart items that match the barcode_product_code
+    let updatedProducts = deiveryProducts.map((order) => {
+      const updatedCartItems = (order.cart_items || []).filter(
+        (item) => item.barcode_product_code !== barcode_product_code
+      );
+      return {
+        ...order,
+        cart_items: updatedCartItems,
+      };
+    });
+
+    // 4. Remove orders that now have no cart_items
+    updatedProducts = updatedProducts.filter((order) => order.cart_items.length > 0);
+
+    // 5. Update DB
+    await pool.query(
+      `UPDATE delivery_partners SET Deivery_Products = ? WHERE id = ?`,
+      [JSON.stringify(updatedProducts), partnerId]
+    );
+
+    return res.json({
+      message: "Cart item removed successfully",
+      id: partnerId,
+      barcode_product_code,
+    });
+  } catch (error) {
+    console.error("deletePartnerByBarcode error:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+
 

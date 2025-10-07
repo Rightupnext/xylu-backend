@@ -3,7 +3,7 @@ const db = require("../db");
 const crypto = require("crypto");
 require("dotenv").config();
 const Razorpay = require("razorpay");
-const { generateBarcodeForOrder } = require('./barcodeController');
+const { generateBarcodeForOrder } = require("./barcodeController");
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -56,73 +56,122 @@ exports.createOrder = async (req, res) => {
 
 // CONFIRM Order After Payment
 exports.confirmOrder = async (req, res) => {
-  const { paymentDetails } = req.body;
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
-    paymentDetails;
+  const { paymentDetails, cartItems } = req.body;
 
+  if (!paymentDetails) return res.status(400).json({ error: "Payment details missing" });
+
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = paymentDetails;
+
+  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    return res.status(400).json({ error: "Invalid request data" });
+  }
+
+  if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
+    return res.status(400).json({ error: "Cart items missing or invalid" });
+  }
+
+  let connection;
   try {
+    // Step 0: Start transaction
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+
     // Step 1: Verify Razorpay signature
-    const hmac = crypto
+    const generatedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-    if (hmac !== razorpay_signature) {
-      // Invalid signature - delete the order
-      await db.query("DELETE FROM full_orders WHERE razorpay_order_id = ?", [
-        razorpay_order_id,
-      ]);
-      return res
-        .status(400)
-        .json({ error: "Invalid payment signature. Order deleted." });
+    if (generatedSignature !== razorpay_signature) {
+      await connection.query(
+        "DELETE FROM full_orders WHERE razorpay_order_id = ?",
+        [razorpay_order_id]
+      );
+      await connection.commit();
+      return res.status(400).json({ error: "Invalid payment signature. Order deleted." });
     }
 
-    // Step 2: Generate 4-digit OTP
+    // Step 2: Deduct inventory with row-level locks
+    for (const item of cartItems) {
+      const { id: productId, selectedColor, selectedSize, quantity } = item;
+
+      const [rows] = await connection.query(
+        `SELECT quantity FROM inventory_variants 
+         WHERE product_id = ? AND color = ? AND size = ? FOR UPDATE`,
+        [productId, selectedColor, selectedSize]
+      );
+
+      if (rows.length === 0) {
+        await connection.rollback();
+        return res.status(400).json({ error: `Variant not found: ${productId}` });
+      }
+
+      const currentQty = rows[0].quantity;
+      if (quantity > currentQty) {
+        await connection.rollback();
+        return res.status(400).json({
+          error: `Insufficient stock for product ${productId} (${selectedColor}, ${selectedSize})`,
+        });
+      }
+
+      await connection.query(
+        `UPDATE inventory_variants SET quantity = ? 
+         WHERE product_id = ? AND color = ? AND size = ?`,
+        [currentQty - quantity, productId, selectedColor, selectedSize]
+      );
+    }
+
+    // Step 3: Generate OTP
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
-    // Step 3: Update the order with payment details and OTP
-    await db.query(
-      `UPDATE full_orders
-       SET razorpay_payment_id = ?, 
-           razorpay_signature = ?, 
-           razor_payment = 'done',
-           otp = ?
+    // Step 4: Update order as confirmed
+    await connection.query(
+      `UPDATE full_orders 
+       SET razorpay_payment_id = ?, razorpay_signature = ?, razor_payment = 'done', otp = ? 
        WHERE razorpay_order_id = ?`,
       [razorpay_payment_id, razorpay_signature, otp, razorpay_order_id]
     );
 
-    // Step 4: Fetch order
-    const [rows] = await db.query(
+    // Step 5: Fetch updated order
+    const [orderRows] = await connection.query(
       `SELECT * FROM full_orders WHERE razorpay_order_id = ?`,
       [razorpay_order_id]
     );
 
-    if (rows.length > 0) {
-      const order = rows[0];
-
-      // Generate barcodes and get array of objects
-      const barcodes = await generateBarcodeForOrder(order);
-
-      // Extract product codes for JSON column
-      const barcodeCodes = barcodes.map(b => b.barcode_text);
-
-      // Update full_orders.Barcode JSON column
-      await db.query(
-        `UPDATE full_orders SET Barcode = ? WHERE id = ?`,
-        [JSON.stringify(barcodeCodes), order.id]
-      );
+    if (orderRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ error: "Order not found" });
     }
 
+    const order = orderRows[0];
+
+    // ✅ Commit transaction BEFORE barcode generation to prevent lock timeout
+    await connection.commit();
+
+    // Step 6: Generate barcodes outside transaction
+    const barcodes = await generateBarcodeForOrder(order);
+    const barcodeCodes = barcodes.map(b => b.barcode_text);
+
+    // Step 7: Update order with barcode paths
+    await db.query(
+      `UPDATE full_orders SET Barcode = ? WHERE id = ?`,
+      [JSON.stringify(barcodeCodes), order.id]
+    );
+
     res.json({
-      message: "Order confirmed, payment successful, and barcodes saved.",
+      message: "Order confirmed, payment successful, inventory updated, barcodes generated",
       otp,
+      barcodes: barcodeCodes,
     });
+
   } catch (err) {
+    if (connection) await connection.rollback();
     console.error("Confirm Order Error:", err);
     res.status(500).json({ error: "Failed to confirm order" });
+  } finally {
+    if (connection) connection.release();
   }
 };
-
 
 // Update Order
 exports.updateOrder = async (req, res) => {

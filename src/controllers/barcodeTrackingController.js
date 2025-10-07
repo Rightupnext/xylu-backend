@@ -9,8 +9,9 @@ exports.trackByBarcode = async (req, res) => {
       `
       SELECT 
         ob.id AS barcode_id,
-        ob.product_code,
+        ob.product_code AS barcode_product_code,
         ob.barcode_image_path,
+        ob.barcode_status,
         ob.created_at AS barcode_created,
 
         -- Order Info
@@ -52,20 +53,25 @@ exports.trackByBarcode = async (req, res) => {
 
     const order = rows[0];
 
-    // cart_items is already an array
-    const cartItems = order.cart_items || [];
+    // cart_items is JSON string in DB
+    let cartItems = [];
+    if (order.cart_items) {
+      try {
+        cartItems = typeof order.cart_items === "string" ? JSON.parse(order.cart_items) : order.cart_items;
+      } catch {}
+    }
 
-    // Extract color and size from product_code (assumes format: x-x-x-Color-Size-x)
+    // Extract color and size from product_code (format: x-x-x-Color-Size-x)
     const parts = product_code.split("-");
     const color = parts[3] || "";
     const size = parts[4] || "";
 
-    // Filter cart items that match color and size
+    // Merge barcode info into cart_items if color/size matches
     const matchedItems = cartItems
       .map((item, index) => ({
         customer_id: order.customer_id,
         order_id: order.order_id,
-        product_id: item.id,
+        product_id: item.product_id,
         selectedColor: item.selectedColor,
         selectedSize: item.selectedSize,
         index,
@@ -75,6 +81,10 @@ exports.trackByBarcode = async (req, res) => {
         price: item.price,
         image: item.image,
         discountedPrice: item.discountedPrice,
+        // Merge barcode info if match
+        barcode_product_code: item.selectedColor === color && item.selectedSize === size ? order.barcode_product_code : null,
+        barcode_image_path: item.selectedColor === color && item.selectedSize === size ? order.barcode_image_path : null,
+        barcode_status: item.selectedColor === color && item.selectedSize === size ? order.barcode_status : null,
       }))
       .filter(item => item.selectedColor === color && item.selectedSize === size);
 
@@ -82,11 +92,12 @@ exports.trackByBarcode = async (req, res) => {
       return res.status(404).json({ error: "No matching item in cart" });
     }
 
-    // Return order info + only matched cart items
+    // Return enriched response
     res.json({
       barcode_id: order.barcode_id,
-      product_code: order.product_code,
+      product_code: order.barcode_product_code,
       barcode_image_path: order.barcode_image_path,
+      barcode_status: order.barcode_status,
       barcode_created: order.barcode_created,
       order_id: order.order_id,
       customer_id: order.customer_id,

@@ -16,18 +16,28 @@ const withEncryption = (handler) =>
         : [handler];
 // Routes
 router.post("/", authenticate,
-    authorizeRoles('admin', 'super-admin', 'customer','D-partner'),
+    authorizeRoles('admin', 'super-admin', 'customer', 'D-partner'),
     ...withEncryption(deliveryPartnerController.createDeliveryPartner));
 router.get("/", authenticate,
-    authorizeRoles('admin', 'super-admin', 'customer','D-partner'),
+    authorizeRoles('admin', 'super-admin', 'customer', 'D-partner'),
     ...withEncryption(deliveryPartnerController.getAllDeliveryPartners));
 router.put("/:id", authenticate,
-    authorizeRoles('admin', 'super-admin', 'customer','D-partner'),
+    authorizeRoles('admin', 'super-admin', 'customer', 'D-partner'),
     ...withEncryption(deliveryPartnerController.updateDeliveryPartner));
-router.delete("/:id", authenticate,
-    authorizeRoles('admin', 'super-admin', 'customer','D-partner'),
-    ...withEncryption(deliveryPartnerController.deleteDeliveryPartner));
+
 router.post("/add-product-d-partner-wise/:partnerId", authenticate,
-    authorizeRoles('admin', 'super-admin', 'customer','D-partner'),
+    authorizeRoles('admin', 'super-admin', 'customer', 'D-partner'),
     ...withEncryption(deliveryPartnerController.AddDeliveryProducts_D_Partner_Wise));
+// ✅ Place this first
+router.delete("/delete-partner-by-barcode", authenticate,
+    authorizeRoles('admin', 'super-admin', 'customer', 'D-partner'),
+    ...withEncryption(deliveryPartnerController.deletePartnerByBarcode)
+);
+
+// keep this after
+router.delete("/:id", authenticate,
+    authorizeRoles('admin', 'super-admin', 'customer', 'D-partner'),
+    ...withEncryption(deliveryPartnerController.deleteDeliveryPartner)
+);
+
 module.exports = router;

@@ -23,7 +23,13 @@ router.get(
   "/",
   authenticate,
   authorizeRoles("admin"),
-  ...withEncryption(userController.getAllUsers)
+  ...withEncryption(userController.getUsers)
+);
+router.put(
+  "/role",
+  authenticate,
+  authorizeRoles("admin"),
+  ...withEncryption(userController.updateUserRole)
 );
 
 

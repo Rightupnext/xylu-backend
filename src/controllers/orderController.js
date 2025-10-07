@@ -127,97 +127,80 @@ exports.confirmOrder = async (req, res) => {
 // Update Order
 exports.updateOrder = async (req, res) => {
   const { orderId } = req.params;
-  const {
-    deliveryman_name,
-    deliveryman_phone,
-    otp,
-    order_status,
-    admin_issue_returnReply,
-  } = req.body;
-
-  // console.log("Incoming Body:", req.body);
+  const { deliveryman_name, deliveryman_phone, otp, admin_issue_returnReply, products = [] } = req.body;
 
   try {
-    // Fetch existing order info
-    const [rows] = await db.query(
-      `SELECT otp, order_status, deliveryman_name, deliveryman_phone, admin_issue_returnReply FROM full_orders WHERE id = ?`,
-      [orderId]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ error: "Order not found" });
-    }
+    // 1️⃣ Fetch existing order
+    const [rows] = await db.query(`SELECT * FROM full_orders WHERE id = ?`, [orderId]);
+    if (rows.length === 0) return res.status(404).json({ error: "Order not found" });
 
     const existing = rows[0];
-    const cleanedOtp = (otp || "").toString().trim();
     const updates = [];
-    let finalStatus = existing.order_status;
 
-    // Check OTP
-    if (cleanedOtp) {
-      if (cleanedOtp !== existing.otp) {
-        return res.status(400).json({ error: "Invalid OTP provided." });
-      } else {
-        finalStatus = "delivered";
-        updates.push("OTP verified and status updated to 'delivered'");
+    // 2️⃣ Update only given products
+    const statuses = [];
+    if (products.length > 0) {
+      for (const prod of products) {
+        const { order_barcode, order_barcode_status } = prod;
+
+        await db.query(
+          `UPDATE order_barcodes 
+           SET barcode_status = ? 
+           WHERE order_id = ? AND product_code = ?`,
+          [order_barcode_status, orderId, order_barcode]
+        );
+
+        statuses.push(order_barcode_status);
+        updates.push(`Product ${order_barcode} → ${order_barcode_status}`);
       }
-    } else if (order_status && order_status !== existing.order_status) {
-      finalStatus = order_status;
-      updates.push("Order status updated");
     }
 
-    // Compare other fields and record changes
-    if (deliveryman_name && deliveryman_name !== existing.deliveryman_name) {
-      updates.push("Deliveryman name updated");
+    // 3️⃣ Strict 5-stage logic (lowest stage wins)
+    const stageOrder = ["pending", "packed", "shipped", "received", "delivered"];
+    let finalStatus = "pending";
+    for (const stage of stageOrder) {
+      if (statuses.includes(stage)) {
+        finalStatus = stage;
+        break;
+      }
     }
 
-    if (deliveryman_phone && deliveryman_phone !== existing.deliveryman_phone) {
-      updates.push("Deliveryman phone updated");
-    }
-
-    if (
-      admin_issue_returnReply &&
-      admin_issue_returnReply !== existing.admin_issue_returnReply
-    ) {
-      updates.push("Admin issue reply updated");
-    }
-
-    // If nothing actually changed, notify
-    if (updates.length === 0) {
-      return res.json({
-        message: "No changes detected.",
-        updated: false,
-      });
-    }
-
-    // Perform update
-    const [updateResult] = await db.query(
-      `UPDATE full_orders
-       SET 
-         deliveryman_name = ?, 
-         deliveryman_phone = ?, 
-         order_status = ?, 
-         admin_issue_returnReply = ?
+    // 4️⃣ Update full_orders
+    await db.query(
+      `UPDATE full_orders 
+       SET deliveryman_name = ?, deliveryman_phone = ?, otp = ?, admin_issue_returnReply = ?, order_status = ? 
        WHERE id = ?`,
       [
         deliveryman_name || existing.deliveryman_name,
         deliveryman_phone || existing.deliveryman_phone,
-        finalStatus,
+        otp || existing.otp,
         admin_issue_returnReply || existing.admin_issue_returnReply,
+        finalStatus,
         orderId,
       ]
     );
 
+    updates.push(`Full order status recalculated as '${finalStatus}'`);
+
+    // 5️⃣ Response
     return res.json({
-      message: updates.join(", "),
-      updated: true,
+      message: updates.length ? updates.join(", ") : "No changes detected",
+      updated: updates.length > 0,
       finalStatus,
+      allStatuses: statuses,
     });
+
   } catch (error) {
     console.error("Update Order Error:", error);
     return res.status(500).json({ error: "Failed to update order" });
   }
 };
+
+
+
+
+
+
 
 exports.clientUpdateOrderIssue = async (req, res) => {
   const { orderId } = req.params;
@@ -266,6 +249,7 @@ exports.clientUpdateOrderIssue = async (req, res) => {
 
 exports.getAllOrders = async (req, res) => {
   try {
+    // 1️⃣ Get all orders with user info
     const [orders] = await db.query(`
       SELECT fo.*, u.username, u.email
       FROM full_orders fo
@@ -273,12 +257,52 @@ exports.getAllOrders = async (req, res) => {
       ORDER BY fo.id DESC
     `);
 
+    // 2️⃣ Loop through each order
+    for (const order of orders) {
+      // Parse cart_items JSON if stored as string
+      const cartItems = Array.isArray(order.cart_items)
+        ? order.cart_items
+        : JSON.parse(order.cart_items || "[]");
+
+      const barcodeArray = Array.isArray(order.Barcode)
+        ? order.Barcode
+        : JSON.parse(order.Barcode || "[]");
+
+      // Fetch barcodes for this order if available
+      let orderBarcodes = [];
+      if (barcodeArray.length > 0) {
+        const [barcodes] = await db.query(
+          `SELECT product_code, barcode_image_path, barcode_status FROM order_barcodes WHERE order_id = ?`,
+          [order.id]
+        );
+        orderBarcodes = barcodes;
+      }
+
+      // Map cart items with barcode info
+      order.cart_items = cartItems.map(item => {
+        // Try to match barcode by product_code
+        const matchedBarcode = orderBarcodes.find(b =>
+          b.product_code === item.order_barcode ||
+          (b.product_code.includes(item.selectedColor) &&
+            b.product_code.includes(item.selectedSize))
+        );
+
+        return {
+          ...item,
+          order_barcode_status: matchedBarcode ? matchedBarcode.barcode_status : null,
+          order_barcode: matchedBarcode ? matchedBarcode.product_code : item.order_barcode || null,
+          barcode_image_path: matchedBarcode ? matchedBarcode.barcode_image_path : null,
+        };
+      });
+    }
+
     res.json(orders);
   } catch (error) {
     console.error("Get All Orders Error:", error);
     res.status(500).json({ error: "Failed to fetch orders" });
   }
 };
+
 exports.getUserIdByOrder = async (req, res) => {
   const { customer_id } = req.query;
 

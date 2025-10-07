@@ -4,7 +4,7 @@ const crypto = require("crypto");
 require("dotenv").config();
 const Razorpay = require("razorpay");
 const { generateBarcodeForOrder } = require("./barcodeController");
-
+const { getIo }=require("../socket/socket");
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
@@ -441,5 +441,57 @@ exports.getOrderAnalytics = async (req, res) => {
   } catch (error) {
     console.error("Order Analytics Error:", error);
     res.status(500).json({ error: "Failed to generate order analytics" });
+  }
+};
+exports.updateBarcodeStatus = async (req, res) => {
+  try {
+    const { product_code, barcode_status } = req.body;
+
+    if (!product_code || !barcode_status) {
+      return res.status(400).json({ error: "Missing product_code or status" });
+    }
+
+    // 1️⃣ Find the barcode record
+    const [rows] = await db.query(
+      `SELECT * FROM order_barcodes WHERE product_code = ?`,
+      [product_code]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Barcode not found" });
+    }
+
+    const barcode = rows[0];
+
+    // 2️⃣ Update the status
+    await db.query(
+      `UPDATE order_barcodes SET barcode_status = ? WHERE product_code = ?`,
+      [barcode_status, product_code]
+    );
+
+    // 3️⃣ Emit socket event (real-time update)
+    const io = getIo();
+    io.emit("barcodeStatusUpdated", {
+      order_id: barcode.order_id,
+      product_code,
+      new_status: barcode_status,
+      updated_at: new Date(),
+    });
+
+    // 4️⃣ Optional: update full_orders.status if needed
+    await db.query(
+      `UPDATE full_orders 
+       SET order_status = ? 
+       WHERE id = ?`,
+      [barcode_status, barcode.order_id]
+    );
+
+    res.json({
+      message: `Barcode ${product_code} updated to ${barcode_status}`,
+      success: true,
+    });
+  } catch (error) {
+    console.error("Barcode update error:", error);
+    res.status(500).json({ error: "Failed to update barcode status" });
   }
 };

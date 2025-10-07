@@ -10,6 +10,7 @@ CREATE TABLE boutique_inventory (
     Bulk_discount INT DEFAULT 0,  
     offerExpiry JSON,
     trend ENUM('new', 'bestseller', 'regular') DEFAULT 'regular',
+    is_deleted TINYINT(1) DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

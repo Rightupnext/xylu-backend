@@ -41,10 +41,22 @@ router.put(
 );
 
 router.delete(
-  "/:id",
+  "/permanantly-delete/:id",
   authenticate,
   authorizeRoles("admin"),
-  ...withEncryption(productController.deleteProduct)
+  ...withEncryption(productController.PermenantlydeleteProduct)
+);
+router.patch(
+  "/soft-delete/:id",
+  authenticate,
+  authorizeRoles("admin"),
+  ...withEncryption(productController.softDeleteProduct)
+);
+router.patch(
+  "/restore/:id",
+  authenticate,
+  authorizeRoles("admin"),
+  ...withEncryption(productController.restoreProduct)
 );
 
 module.exports = router;

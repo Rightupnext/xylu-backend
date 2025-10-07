@@ -56,8 +56,8 @@ router.put(
 );
 router.post(
   "/update-status",
-  // authenticate,
-  // authorizeRoles('admin', 'super-admin', 'D-partner'),
+  authenticate,
+  authorizeRoles('admin', 'super-admin', 'D-partner'),
   ...withEncryption(orderController.updateBarcodeStatus)
 );
 

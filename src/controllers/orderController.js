@@ -4,7 +4,7 @@ const crypto = require("crypto");
 require("dotenv").config();
 const Razorpay = require("razorpay");
 const { generateBarcodeForOrder } = require("./barcodeController");
-const { getIo }=require("../socket/socket");
+const { getIo } = require("../socket/socket");
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
@@ -58,9 +58,11 @@ exports.createOrder = async (req, res) => {
 exports.confirmOrder = async (req, res) => {
   const { paymentDetails, cartItems } = req.body;
 
-  if (!paymentDetails) return res.status(400).json({ error: "Payment details missing" });
+  if (!paymentDetails)
+    return res.status(400).json({ error: "Payment details missing" });
 
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = paymentDetails;
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
+    paymentDetails;
 
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
     return res.status(400).json({ error: "Invalid request data" });
@@ -88,7 +90,9 @@ exports.confirmOrder = async (req, res) => {
         [razorpay_order_id]
       );
       await connection.commit();
-      return res.status(400).json({ error: "Invalid payment signature. Order deleted." });
+      return res
+        .status(400)
+        .json({ error: "Invalid payment signature. Order deleted." });
     }
 
     // Step 2: Deduct inventory with row-level locks
@@ -103,7 +107,9 @@ exports.confirmOrder = async (req, res) => {
 
       if (rows.length === 0) {
         await connection.rollback();
-        return res.status(400).json({ error: `Variant not found: ${productId}` });
+        return res
+          .status(400)
+          .json({ error: `Variant not found: ${productId}` });
       }
 
       const currentQty = rows[0].quantity;
@@ -150,20 +156,20 @@ exports.confirmOrder = async (req, res) => {
 
     // Step 6: Generate barcodes outside transaction
     const barcodes = await generateBarcodeForOrder(order);
-    const barcodeCodes = barcodes.map(b => b.barcode_text);
+    const barcodeCodes = barcodes.map((b) => b.barcode_text);
 
     // Step 7: Update order with barcode paths
-    await db.query(
-      `UPDATE full_orders SET Barcode = ? WHERE id = ?`,
-      [JSON.stringify(barcodeCodes), order.id]
-    );
+    await db.query(`UPDATE full_orders SET Barcode = ? WHERE id = ?`, [
+      JSON.stringify(barcodeCodes),
+      order.id,
+    ]);
 
     res.json({
-      message: "Order confirmed, payment successful, inventory updated, barcodes generated",
+      message:
+        "Order confirmed, payment successful, inventory updated, barcodes generated",
       otp,
       barcodes: barcodeCodes,
     });
-
   } catch (err) {
     if (connection) await connection.rollback();
     console.error("Confirm Order Error:", err);
@@ -176,12 +182,21 @@ exports.confirmOrder = async (req, res) => {
 // Update Order
 exports.updateOrder = async (req, res) => {
   const { orderId } = req.params;
-  const { deliveryman_name, deliveryman_phone, otp, admin_issue_returnReply, products = [] } = req.body;
+  const {
+    deliveryman_name,
+    deliveryman_phone,
+    otp,
+    admin_issue_returnReply,
+    products = [],
+  } = req.body;
 
   try {
     // 1️⃣ Fetch existing order
-    const [rows] = await db.query(`SELECT * FROM full_orders WHERE id = ?`, [orderId]);
-    if (rows.length === 0) return res.status(404).json({ error: "Order not found" });
+    const [rows] = await db.query(`SELECT * FROM full_orders WHERE id = ?`, [
+      orderId,
+    ]);
+    if (rows.length === 0)
+      return res.status(404).json({ error: "Order not found" });
 
     const existing = rows[0];
     const updates = [];
@@ -205,7 +220,13 @@ exports.updateOrder = async (req, res) => {
     }
 
     // 3️⃣ Strict 5-stage logic (lowest stage wins)
-    const stageOrder = ["pending", "packed", "shipped", "received", "delivered"];
+    const stageOrder = [
+      "pending",
+      "packed",
+      "shipped",
+      "received",
+      "delivered",
+    ];
     let finalStatus = "pending";
     for (const stage of stageOrder) {
       if (statuses.includes(stage)) {
@@ -238,18 +259,11 @@ exports.updateOrder = async (req, res) => {
       finalStatus,
       allStatuses: statuses,
     });
-
   } catch (error) {
     console.error("Update Order Error:", error);
     return res.status(500).json({ error: "Failed to update order" });
   }
 };
-
-
-
-
-
-
 
 exports.clientUpdateOrderIssue = async (req, res) => {
   const { orderId } = req.params;
@@ -328,19 +342,26 @@ exports.getAllOrders = async (req, res) => {
       }
 
       // Map cart items with barcode info
-      order.cart_items = cartItems.map(item => {
+      order.cart_items = cartItems.map((item) => {
         // Try to match barcode by product_code
-        const matchedBarcode = orderBarcodes.find(b =>
-          b.product_code === item.order_barcode ||
-          (b.product_code.includes(item.selectedColor) &&
-            b.product_code.includes(item.selectedSize))
+        const matchedBarcode = orderBarcodes.find(
+          (b) =>
+            b.product_code === item.order_barcode ||
+            (b.product_code.includes(item.selectedColor) &&
+              b.product_code.includes(item.selectedSize))
         );
 
         return {
           ...item,
-          order_barcode_status: matchedBarcode ? matchedBarcode.barcode_status : null,
-          order_barcode: matchedBarcode ? matchedBarcode.product_code : item.order_barcode || null,
-          barcode_image_path: matchedBarcode ? matchedBarcode.barcode_image_path : null,
+          order_barcode_status: matchedBarcode
+            ? matchedBarcode.barcode_status
+            : null,
+          order_barcode: matchedBarcode
+            ? matchedBarcode.product_code
+            : item.order_barcode || null,
+          barcode_image_path: matchedBarcode
+            ? matchedBarcode.barcode_image_path
+            : null,
         };
       });
     }
@@ -446,6 +467,7 @@ exports.getOrderAnalytics = async (req, res) => {
 exports.updateBarcodeStatus = async (req, res) => {
   try {
     const { product_code, barcode_status } = req.body;
+    console.log("product_code, barcode_status", product_code, barcode_status);
 
     if (!product_code || !barcode_status) {
       return res.status(400).json({ error: "Missing product_code or status" });

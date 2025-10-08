@@ -2,9 +2,9 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path"); // ✅ FIXED: Add this line
 require("dotenv").config();
-
+const http=require('http')
 const app = express();
-
+const { initSocket } =require("./src/socket/socket");
 const authRoutes = require("./src/routes/authRoutes");
 const userRoutes = require("./src/routes/userRoutes");
 const HeroRoutes = require("./src/routes/heroRoutes");
@@ -48,9 +48,11 @@ app.use(
 app.get("/", (req, res) => {
   res.send("API Running...");
 });
+const server = http.createServer(app);
+initSocket(server);
 
 const PORT = process.env.PORT || 5000;
-const IP = "192.168.1.8";
+const IP = "192.168.1.17";
 // app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
 app.listen(PORT, IP, () => {
   console.log(`Server running at http://${IP}:${PORT}/`);

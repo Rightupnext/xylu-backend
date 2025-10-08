@@ -275,41 +275,87 @@ exports.getAllProducts = async (req, res) => {
   }
 };
 
-exports.deleteProduct = async (req, res) => {
+exports.PermenantlydeleteProduct = async (req, res) => {
   const { id } = req.params;
   const uploadDir = path.join(__dirname, "../../uploads/products");
 
   try {
-    // Step 1: Get image name
-    const [rows] = await db.query(`SELECT image FROM boutique_inventory WHERE id = ?`, [id]);
+    // Step 1: Get images (JSON array) from DB
+    const [rows] = await db.query(`SELECT images FROM boutique_inventory WHERE id = ?`, [id]);
 
     if (rows.length === 0) {
       return res.status(404).json({ message: "Product not found" });
     }
 
-    let image = rows[0].image;
-    if (!image) image = "";
-
-    const cleanImage = image.replace(/^products\//, "").trim();
-    const imagePath = path.join(uploadDir, cleanImage);
-    // console.log("🧭 Full image path to delete:", imagePath);
+    let imagesArray = [];
+    try {
+      imagesArray = JSON.parse(rows[0].images || "[]");
+    } catch {
+      imagesArray = [];
+    }
 
     // Step 2: Delete product and variants
     await db.query(`DELETE FROM boutique_inventory WHERE id = ?`, [id]);
     await db.query(`DELETE FROM inventory_variants WHERE product_id = ?`, [id]);
 
-    // Step 3: Delete image
-    if (cleanImage && fsSync.existsSync(imagePath)) {
-      await fs.unlink(imagePath);
-      // console.log("🗑 Deleted image from folder:", cleanImage);
-    } else {
-      console.log("⚠️ Image file not found or already deleted.");
+    // Step 3: Delete images from folder
+    for (const img of imagesArray) {
+      const cleanImage = img.replace(/^products\//, "").trim();
+      const imagePath = path.join(uploadDir, cleanImage);
+
+      if (fsSync.existsSync(imagePath)) {
+        await fs.unlink(imagePath);
+        console.log("🗑 Deleted image from folder:", cleanImage);
+      } else {
+        console.log("⚠️ Image file not found or already deleted:", cleanImage);
+      }
     }
 
-    res.json({ message: "✅ Product and image deleted successfully" });
+    res.json({ message: "✅ Product and images deleted successfully" });
 
   } catch (error) {
     console.error("❌ Deletion failed:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+};
+exports.softDeleteProduct = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Check if product exists
+    const [rows] = await db.query(
+      `SELECT id FROM boutique_inventory WHERE id = ?`,
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    // Soft delete
+    await db.query(
+      `UPDATE boutique_inventory SET is_deleted = 1 WHERE id = ?`,
+      [id]
+    );
+
+    res.json({ message: "✅ Product hidden successfully (soft deleted)" });
+  } catch (error) {
+    console.error("❌ Soft delete failed:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+};
+exports.restoreProduct = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    await db.query(
+      `UPDATE boutique_inventory SET is_deleted = 0 WHERE id = ?`,
+      [id]
+    );
+
+    res.json({ message: "✅ Product restored successfully" });
+  } catch (error) {
+    console.error("❌ Restore failed:", error.message);
     res.status(500).json({ error: error.message });
   }
 };

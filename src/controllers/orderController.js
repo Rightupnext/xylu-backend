@@ -467,15 +467,14 @@ exports.getOrderAnalytics = async (req, res) => {
 exports.updateBarcodeStatus = async (req, res) => {
   try {
     const { product_code, barcode_status } = req.body;
-    console.log("Received:", { product_code, barcode_status });
 
     if (!product_code) {
       return res.status(400).json({ error: "Missing product_code" });
     }
 
-    // 1️⃣ Fetch barcode + order + product info
+    // 1️⃣ Fetch main barcode + order + product info
     const [rows] = await db.query(
-      `SELECT ob.*, fo.*, bi.*
+      `SELECT ob.*, fo.*, bi.image AS product_image, bi.price AS product_price
        FROM order_barcodes ob
        INNER JOIN full_orders fo ON ob.order_id = fo.id
        INNER JOIN boutique_inventory bi ON ob.product_id = bi.id
@@ -489,27 +488,31 @@ exports.updateBarcodeStatus = async (req, res) => {
 
     const order = rows[0];
 
-    // 2️⃣ Parse cart_items JSON
+    // 2️⃣ Parse cart_items JSON safely
     let cartItems = [];
     if (order.cart_items) {
       try {
-        cartItems = typeof order.cart_items === "string" ? JSON.parse(order.cart_items) : order.cart_items;
+        cartItems =
+          typeof order.cart_items === "string"
+            ? JSON.parse(order.cart_items)
+            : order.cart_items;
       } catch (err) {
         console.warn("Failed to parse cart_items:", err);
       }
     }
 
-    // 3️⃣ Extract color and size from product_code
+    // 3️⃣ Extract color and size from scanned product_code
     const parts = product_code.split("-");
     const color = parts[3] || "";
     const size = parts[4] || "";
 
-    // 4️⃣ Merge barcode info into cart_items
+    // 4️⃣ Filter matched item from cart
+    // 4️⃣ Filter matched item from cart
     const matchedItems = cartItems
       .map((item, index) => ({
         customer_id: order.customer_id,
         order_id: order.order_id,
-        product_id: item.product_id,
+        product_id: item.id,
         selectedColor: item.selectedColor,
         selectedSize: item.selectedSize,
         index,
@@ -518,17 +521,72 @@ exports.updateBarcodeStatus = async (req, res) => {
         quantity: item.quantity,
         price: item.price,
         discountedPrice: item.discountedPrice,
-        barcode_product_code: item.selectedColor === color && item.selectedSize === size ? order.product_code : null,
-        barcode_image_path: item.selectedColor === color && item.selectedSize === size ? order.barcode_image_path : null,
-        barcode_status: item.selectedColor === color && item.selectedSize === size ? order.barcode_status : null,
+        barcode_product_code:
+          item.selectedColor === color && item.selectedSize === size
+            ? order.product_code
+            : null,
+        barcode_image_path:
+          item.selectedColor === color && item.selectedSize === size
+            ? order.barcode_image_path
+            : null,
+        barcode_status:
+          item.selectedColor === color && item.selectedSize === size
+            ? order.barcode_status
+            : null,
+        subtotal: order.subtotal,
+        shipping: order.shipping,
+        tax: order.tax,
+        total: order.total,
+        image: item.image, // ✅ add this
       }))
-      .filter(item => item.selectedColor === color && item.selectedSize === size);
+      .filter(
+        (item) => item.selectedColor === color && item.selectedSize === size
+      );
 
     if (matchedItems.length === 0) {
       return res.status(404).json({ error: "No matching item in cart" });
     }
 
-    // 5️⃣ Prepare enriched response including payment and issue info
+    // 5️⃣ Build related_order from full_orders.cart_items + barcode info
+    const enrichedRelatedOrders = await Promise.all(
+      cartItems
+        .filter(
+          (item) =>
+            !(item.selectedColor === color && item.selectedSize === size) // skip scanned item
+        )
+        .map(async (item) => {
+          // Try to fetch barcode info for this item
+          const [barcodeRows] = await db.query(
+            `SELECT product_code, barcode_image_path, barcode_status 
+             FROM order_barcodes 
+             WHERE order_id = ? AND product_id = ? 
+             LIMIT 1`,
+            [order.order_id, item.id]
+          );
+
+          const barcode = barcodeRows[0] || {};
+
+          return {
+            selectedColor: item.selectedColor,
+            selectedSize: item.selectedSize,
+            product_name: item.product_name,
+            quantity: item.quantity,
+            price: item.price,
+            discountedPrice: item.discountedPrice,
+            barcode_product_code:
+              barcode.product_code || item.product_code || null,
+            barcode_image_path: barcode.barcode_image_path || null,
+            barcode_status: barcode.barcode_status || null,
+            image: item.image,
+            subtotal: order.subtotal,
+            shipping: order.shipping,
+            tax: order.tax,
+            total: order.total,
+          };
+        })
+    );
+
+    // 6️⃣ Build final enriched response payload
     const responsePayload = {
       barcode_id: order.id,
       product_code: order.product_code,
@@ -542,46 +600,47 @@ exports.updateBarcodeStatus = async (req, res) => {
       customer_phone: order.customer_phone,
       customer_address: order.customer_address,
       order_status: order.order_status,
+      subtotal: order.subtotal,
+      shipping: order.shipping,
+      tax: order.tax,
       total: order.total,
       cart_items: matchedItems,
+      related_order: enrichedRelatedOrders,
       order_date: order.created_at,
       deliveryman_name: order.deliveryman_name,
       deliveryman_phone: order.deliveryman_phone,
       product_id: order.product_id,
       product_name: order.product_name,
       category: order.category,
-      price: order.price,
+      price: order.product_price || order.price,
       discount: order.discount,
       trend: order.trend,
-      image: order.image,
-      // ✅ Payment info
+      // image: order.product_image,
       razorpay_payment_id: order.razorpay_payment_id,
       razorpay_order_id: order.razorpay_order_id,
       razorpay_signature: order.razorpay_signature,
       razor_payment: order.razor_payment,
-      // ✅ Issue details
       issue_type: order.issue_type,
       issue_product_code: order.issue_product_code,
       issue_description: order.issue_description,
       admin_issue_returnReply: order.admin_issue_returnReply,
     };
 
-    // 6️⃣ Send the enriched response first
+    // 7️⃣ Send enriched response to client
     res.json(responsePayload);
 
-    // 7️⃣ Update status if provided
+    // 8️⃣ Update barcode + order status if provided
     if (barcode_status) {
       await db.query(
         `UPDATE order_barcodes SET barcode_status = ? WHERE product_code = ?`,
         [barcode_status, product_code]
       );
 
-      await db.query(
-        `UPDATE full_orders SET order_status = ? WHERE id = ?`,
-        [barcode_status, order.order_id]
-      );
+      await db.query(`UPDATE full_orders SET order_status = ? WHERE id = ?`, [
+        barcode_status,
+        order.order_id,
+      ]);
 
-      // 8️⃣ Emit socket event for real-time updates
       const io = getIo();
       io.emit("barcodeStatusUpdated", {
         order_id: order.order_id,
@@ -590,10 +649,8 @@ exports.updateBarcodeStatus = async (req, res) => {
         updated_at: new Date(),
       });
     }
-
   } catch (error) {
     console.error("Barcode update error:", error);
     res.status(500).json({ error: "Failed to update barcode status" });
   }
 };
-

@@ -467,7 +467,8 @@ exports.getOrderAnalytics = async (req, res) => {
 exports.updateBarcodeStatus = async (req, res) => {
   try {
     const { product_code, barcode_status } = req.body;
-
+    console.log("product_code", product_code);
+    console.log("barcode_status", barcode_status);
     if (!product_code) {
       return res.status(400).json({ error: "Missing product_code" });
     }

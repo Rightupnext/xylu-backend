@@ -8,7 +8,9 @@ const BARCODE_DIR = path.join(__dirname, "../../uploads/barcodes");
 if (!fs.existsSync(BARCODE_DIR)) fs.mkdirSync(BARCODE_DIR, { recursive: true });
 
 /**
- * Generate high-quality, scannable barcodes for all products in an order
+ * Generate barcodes for all products in an order
+ * Each variant gets a unique barcode using: customer_id, order_id, product_id, color, size, index
+ * customer_id-order_id-product_id-selectedColor-selectedSize-index
  */
 async function generateBarcodeForOrder(order) {
   try {

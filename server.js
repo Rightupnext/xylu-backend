@@ -52,7 +52,7 @@ const server = http.createServer(app);
 initSocket(server);
 
 const PORT = process.env.PORT || 5000;
-const IP = "192.168.1.17";
+const IP = process.env.IP || ' localhost';
 // app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
 app.listen(PORT, IP, () => {
   console.log(`Server running at http://${IP}:${PORT}/`);

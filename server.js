@@ -2,9 +2,9 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path"); // ✅ FIXED: Add this line
 require("dotenv").config();
-const http=require('http')
+const http = require('http')
 const app = express();
-const { initSocket } =require("./src/socket/socket");
+const { initSocket } = require("./src/socket/socket");
 const authRoutes = require("./src/routes/authRoutes");
 const userRoutes = require("./src/routes/userRoutes");
 const HeroRoutes = require("./src/routes/heroRoutes");

@@ -180,12 +180,12 @@ exports.confirmOrder = async (req, res) => {
 };
 
 // Update Order
+// Update Order
 exports.updateOrder = async (req, res) => {
   const { orderId } = req.params;
   const {
     deliveryman_name,
     deliveryman_phone,
-    otp,
     admin_issue_returnReply,
     products = [],
   } = req.body;
@@ -202,11 +202,12 @@ exports.updateOrder = async (req, res) => {
     const updates = [];
 
     // 2️⃣ Update only given products
-    const statuses = [];
+    const clientVisibleStatuses = []; // Only pending, packed, shipped, delivered
     if (products.length > 0) {
       for (const prod of products) {
         const { order_barcode, order_barcode_status } = prod;
 
+        // Update barcode status
         await db.query(
           `UPDATE order_barcodes 
            SET barcode_status = ? 
@@ -214,36 +215,35 @@ exports.updateOrder = async (req, res) => {
           [order_barcode_status, orderId, order_barcode]
         );
 
-        statuses.push(order_barcode_status);
         updates.push(`Product ${order_barcode} → ${order_barcode_status}`);
+
+        // Only include statuses that should affect client-visible order_status
+        if (["pending", "packed", "shipped", "delivered"].includes(order_barcode_status)) {
+          clientVisibleStatuses.push(order_barcode_status);
+        }
       }
     }
 
-    // 3️⃣ Strict 5-stage logic (lowest stage wins)
-    const stageOrder = [
-      "pending",
-      "packed",
-      "shipped",
-      "received",
-      "delivered",
-    ];
-    let finalStatus = "pending";
-    for (const stage of stageOrder) {
-      if (statuses.includes(stage)) {
-        finalStatus = stage;
-        break;
+    // 3️⃣ Recalculate full_orders status based only on client-visible statuses
+    let finalStatus = existing.order_status; // default: keep existing
+    if (clientVisibleStatuses.length > 0) {
+      const stageOrder = ["pending", "packed", "shipped", "delivered"];
+      for (const stage of stageOrder) {
+        if (clientVisibleStatuses.includes(stage)) {
+          finalStatus = stage;
+          break; // lowest stage wins
+        }
       }
     }
 
-    // 4️⃣ Update full_orders
+    // 4️⃣ Update full_orders with delivery info & recalculated status
     await db.query(
       `UPDATE full_orders 
-       SET deliveryman_name = ?, deliveryman_phone = ?, otp = ?, admin_issue_returnReply = ?, order_status = ? 
+       SET deliveryman_name = ?, deliveryman_phone = ?, admin_issue_returnReply = ?, order_status = ? 
        WHERE id = ?`,
       [
         deliveryman_name || existing.deliveryman_name,
         deliveryman_phone || existing.deliveryman_phone,
-        otp || existing.otp,
         admin_issue_returnReply || existing.admin_issue_returnReply,
         finalStatus,
         orderId,
@@ -257,7 +257,7 @@ exports.updateOrder = async (req, res) => {
       message: updates.length ? updates.join(", ") : "No changes detected",
       updated: updates.length > 0,
       finalStatus,
-      allStatuses: statuses,
+      allStatuses: products.map(p => p.order_barcode_status),
     });
   } catch (error) {
     console.error("Update Order Error:", error);

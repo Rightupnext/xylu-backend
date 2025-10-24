@@ -1,9 +1,9 @@
 // socket.js
-import { Server } from "socket.io";
+const { Server }=require("socket.io");
 
 let io;
 
-export const initSocket = (server) => {
+exports.initSocket = (server) => {
   io = new Server(server, {
     cors: { origin: "*" },
   });
@@ -26,7 +26,7 @@ export const initSocket = (server) => {
 };
 
 // Get the io instance anywhere
-export const getIo = () => {
+exports.getIo = () => {
   if (!io) {
     throw new Error("Socket.io not initialized!");
   }

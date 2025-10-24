@@ -14,4 +14,5 @@ router.get("/check/:userId", giftController.checkUserGiftThreshold);
 
 // Get all users progress
 router.get("/progress", giftController.getAllUsersGiftProgress);
+router.get("/delete/:id", giftController.deleteGiftThreshold);
 module.exports = router;

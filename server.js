@@ -1,65 +1,72 @@
 const express = require("express");
 const cors = require("cors");
-const path = require("path"); // ✅ FIXED: Add this line
+const path = require("path");
+const cron = require("node-cron");
 require("dotenv").config();
-const http = require('http')
+const http = require("http");
+
 const app = express();
 const { initSocket } = require("./src/socket/socket");
+
+// Route imports
 const authRoutes = require("./src/routes/authRoutes");
 const userRoutes = require("./src/routes/userRoutes");
-const HeroRoutes = require("./src/routes/heroRoutes");
+const heroRoutes = require("./src/routes/heroRoutes");
 const categoryRoutes = require("./src/routes/categoryRoutes");
 const productRoutes = require("./src/routes/productRoutes");
-const OrderRoutes = require("./src/routes/orderRoutes");
-const ReviewRoutes = require("./src/routes/reviewRoutes");
-const giftRoute = require("./src/routes/giftRoutes");
+const orderRoutes = require("./src/routes/orderRoutes");
+const reviewRoutes = require("./src/routes/reviewRoutes");
+const giftRoutes = require("./src/routes/giftRoutes");
 const deliveryPartnerRoutes = require("./src/routes/deliveryPartnerRoutes");
 const barcodeTrackingRoutes = require("./src/routes/barcodeTrackingRoutes");
-// app.use(cors());
+const cleanUnusedFiles = require("./cleanUnusedFiles");
+
+// Middleware
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
+// Routes
 app.use("/auth", authRoutes);
 app.use("/users", userRoutes);
-app.use("/hero", HeroRoutes);
+app.use("/hero", heroRoutes);
 app.use("/categories", categoryRoutes);
 app.use("/products", productRoutes);
-app.use("/order", OrderRoutes);
-app.use("/reviews", ReviewRoutes);
-app.use("/gift", giftRoute);
+app.use("/order", orderRoutes);
+app.use("/reviews", reviewRoutes);
+app.use("/gift", giftRoutes);
 app.use("/delivery-partners", deliveryPartnerRoutes);
 app.use("/barcode", barcodeTrackingRoutes);
-app.use(
-  "/uploads/products",
-  express.static(path.join(__dirname, "uploads/products")) // ✅ FIXED
-);
-app.use(
-  "/uploads/hero",
-  express.static(path.join(__dirname, "uploads/hero")) // ✅ FIXED
-);
-app.use(
-  "/uploads/gifts",
-  express.static(path.join(__dirname, "uploads/gifts")) // ✅ FIXED
-);
-app.use(
-  "/uploads/barcodes",
-  express.static(path.join(__dirname, "uploads/barcodes")) // ✅ FIXED
-);
+
+// Static file serving
+app.use("/uploads/products", express.static(path.join(__dirname, "uploads/products")));
+app.use("/uploads/hero", express.static(path.join(__dirname, "uploads/hero")));
+app.use("/uploads/gifts", express.static(path.join(__dirname, "uploads/gifts")));
+app.use("/uploads/barcodes", express.static(path.join(__dirname, "uploads/barcodes")));
+
+// Default route
 app.get("/", (req, res) => {
   res.send("API Running...");
 });
+
+// Server setup
+const PORT = process.env.PORT || 5000;
+const IP = process.env.IP || "localhost";
+
 const server = http.createServer(app);
 initSocket(server);
 
-const PORT = process.env.PORT || 5000;
-const IP = process.env.IP || ' localhost';
-// app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
-app.listen(PORT, IP, () => {
-  console.log(`Server running at http://${IP}:${PORT}/`);
-});
+// Cleanup before start
+(async () => {
+  console.log("🕒 Starting cleanup before server launch...");
+  await cleanUnusedFiles();
 
-console.log("ENV ENCRYPTION_ENABLED:", process.env.ENCRYPTION_ENABLED);
-console.log(
-  "ENCRYPTION_ENABLED === 'true':",
-  process.env.ENCRYPTION_ENABLED === "true"
-);
+  server.listen(PORT, IP, () => {
+    console.log(`🚀 Server running at http://${IP}:${PORT}/`);
+  });
+})();
+
+// Scheduled cleanup job every hour
+cron.schedule("0 * * * *", () => {
+  console.log("🕑 Running auto-clean job...");
+  cleanUnusedFiles();
+});

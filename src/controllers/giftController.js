@@ -316,3 +316,63 @@ exports.getAllUsersGiftProgress = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+exports.deleteGiftThreshold = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    if (!id || isNaN(Number(id))) {
+      return res.status(400).json({ message: "Invalid or missing ID" });
+    }
+
+    // 1️⃣ Check if the gift threshold exists
+    const [rows] = await db.query(
+      `SELECT image_url FROM GiftThreshold WHERE id = ?`,
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Gift threshold not found" });
+    }
+
+    const imageUrl = rows[0].image_url;
+
+    // 2️⃣ Delete the image from the server (if exists)
+    if (imageUrl) {
+      const imagePath = path.join(
+        __dirname,
+        "..",
+        "..",
+        imageUrl.replace(/^[/\\]+/, "")
+      );
+
+      if (fs.existsSync(imagePath)) {
+        fs.unlink(imagePath, (err) => {
+          if (err) {
+            console.warn("⚠️ Failed to delete gift image:", imagePath, err.message);
+          } else {
+            console.log("🗑️ Deleted gift image:", imagePath);
+          }
+        });
+      } else {
+        console.log("⚠️ Image file not found:", imagePath);
+      }
+    }
+
+    // 3️⃣ Delete related customer gift history (if any)
+    await db.query(
+      `DELETE FROM CustomerGiftHistory WHERE gift_threshold_id = ?`,
+      [id]
+    );
+
+    // 4️⃣ Delete the gift threshold record
+    await db.query(`DELETE FROM GiftThreshold WHERE id = ?`, [id]);
+
+    res.json({
+      success: true,
+      message: "✅ Gift threshold and related data deleted successfully",
+    });
+  } catch (error) {
+    console.error("❌ Error deleting gift threshold:", error);
+    res.status(500).json({ error: "Server error", details: error.message });
+  }
+};

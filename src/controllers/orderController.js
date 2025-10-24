@@ -180,12 +180,12 @@ exports.confirmOrder = async (req, res) => {
 };
 
 // Update Order
+// Update Order
 exports.updateOrder = async (req, res) => {
   const { orderId } = req.params;
   const {
     deliveryman_name,
     deliveryman_phone,
-    otp,
     admin_issue_returnReply,
     products = [],
   } = req.body;
@@ -202,11 +202,12 @@ exports.updateOrder = async (req, res) => {
     const updates = [];
 
     // 2️⃣ Update only given products
-    const statuses = [];
+    const clientVisibleStatuses = []; // Only pending, packed, shipped, delivered
     if (products.length > 0) {
       for (const prod of products) {
         const { order_barcode, order_barcode_status } = prod;
 
+        // Update barcode status
         await db.query(
           `UPDATE order_barcodes 
            SET barcode_status = ? 
@@ -214,36 +215,35 @@ exports.updateOrder = async (req, res) => {
           [order_barcode_status, orderId, order_barcode]
         );
 
-        statuses.push(order_barcode_status);
         updates.push(`Product ${order_barcode} → ${order_barcode_status}`);
+
+        // Only include statuses that should affect client-visible order_status
+        if (["pending", "packed", "shipped", "delivered"].includes(order_barcode_status)) {
+          clientVisibleStatuses.push(order_barcode_status);
+        }
       }
     }
 
-    // 3️⃣ Strict 5-stage logic (lowest stage wins)
-    const stageOrder = [
-      "pending",
-      "packed",
-      "shipped",
-      "received",
-      "delivered",
-    ];
-    let finalStatus = "pending";
-    for (const stage of stageOrder) {
-      if (statuses.includes(stage)) {
-        finalStatus = stage;
-        break;
+    // 3️⃣ Recalculate full_orders status based only on client-visible statuses
+    let finalStatus = existing.order_status; // default: keep existing
+    if (clientVisibleStatuses.length > 0) {
+      const stageOrder = ["pending", "packed", "shipped", "delivered"];
+      for (const stage of stageOrder) {
+        if (clientVisibleStatuses.includes(stage)) {
+          finalStatus = stage;
+          break; // lowest stage wins
+        }
       }
     }
 
-    // 4️⃣ Update full_orders
+    // 4️⃣ Update full_orders with delivery info & recalculated status
     await db.query(
       `UPDATE full_orders 
-       SET deliveryman_name = ?, deliveryman_phone = ?, otp = ?, admin_issue_returnReply = ?, order_status = ? 
+       SET deliveryman_name = ?, deliveryman_phone = ?, admin_issue_returnReply = ?, order_status = ? 
        WHERE id = ?`,
       [
         deliveryman_name || existing.deliveryman_name,
         deliveryman_phone || existing.deliveryman_phone,
-        otp || existing.otp,
         admin_issue_returnReply || existing.admin_issue_returnReply,
         finalStatus,
         orderId,
@@ -257,7 +257,7 @@ exports.updateOrder = async (req, res) => {
       message: updates.length ? updates.join(", ") : "No changes detected",
       updated: updates.length > 0,
       finalStatus,
-      allStatuses: statuses,
+      allStatuses: products.map(p => p.order_barcode_status),
     });
   } catch (error) {
     console.error("Update Order Error:", error);
@@ -506,8 +506,52 @@ exports.updateBarcodeStatus = async (req, res) => {
     const color = parts[3] || "";
     const size = parts[4] || "";
 
-    // 4️⃣ Filter matched item from cart
-    // 4️⃣ Filter matched item from cart
+    // 4️⃣ Update barcode status if provided
+    if (barcode_status) {
+      await db.query(
+        `UPDATE order_barcodes SET barcode_status = ? WHERE product_code = ?`,
+        [barcode_status, product_code]
+      );
+    }
+
+    // 5️⃣ Recalculate full_orders status based on all client-visible barcodes
+    const [allBarcodes] = await db.query(
+      `SELECT barcode_status FROM order_barcodes WHERE order_id = ?`,
+      [order.order_id]
+    );
+
+    const clientVisibleStatuses = allBarcodes
+      .map(b => b.barcode_status)
+      .filter(s => ["pending", "packed", "shipped", "delivered"].includes(s));
+
+    let finalStatus = order.order_status;
+    if (clientVisibleStatuses.length > 0) {
+      const stageOrder = ["pending", "packed", "shipped", "delivered"];
+      for (const stage of stageOrder) {
+        if (clientVisibleStatuses.includes(stage)) {
+          finalStatus = stage;
+          break; // lowest stage wins
+        }
+      }
+    }
+
+    // 6️⃣ Update full_orders with recalculated status
+    await db.query(`UPDATE full_orders SET order_status = ? WHERE id = ?`, [
+      finalStatus,
+      order.order_id,
+    ]);
+
+    // 7️⃣ Emit socket event
+    const io = getIo();
+    io.emit("barcodeStatusUpdated", {
+      order_id: order.order_id,
+      product_code,
+      new_status: barcode_status,
+      final_order_status: finalStatus,
+      updated_at: new Date(),
+    });
+
+    // 8️⃣ Build matched cart item for response
     const matchedItems = cartItems
       .map((item, index) => ({
         customer_id: order.customer_id,
@@ -531,31 +575,21 @@ exports.updateBarcodeStatus = async (req, res) => {
             : null,
         barcode_status:
           item.selectedColor === color && item.selectedSize === size
-            ? order.barcode_status
+            ? barcode_status || order.barcode_status
             : null,
         subtotal: order.subtotal,
         shipping: order.shipping,
         tax: order.tax,
         total: order.total,
-        image: item.image, // ✅ add this
+        image: item.image,
       }))
-      .filter(
-        (item) => item.selectedColor === color && item.selectedSize === size
-      );
+      .filter(item => item.selectedColor === color && item.selectedSize === size);
 
-    if (matchedItems.length === 0) {
-      return res.status(404).json({ error: "No matching item in cart" });
-    }
-
-    // 5️⃣ Build related_order from full_orders.cart_items + barcode info
+    // 9️⃣ Build related orders
     const enrichedRelatedOrders = await Promise.all(
       cartItems
-        .filter(
-          (item) =>
-            !(item.selectedColor === color && item.selectedSize === size) // skip scanned item
-        )
+        .filter(item => !(item.selectedColor === color && item.selectedSize === size))
         .map(async (item) => {
-          // Try to fetch barcode info for this item
           const [barcodeRows] = await db.query(
             `SELECT product_code, barcode_image_path, barcode_status 
              FROM order_barcodes 
@@ -563,7 +597,6 @@ exports.updateBarcodeStatus = async (req, res) => {
              LIMIT 1`,
             [order.order_id, item.id]
           );
-
           const barcode = barcodeRows[0] || {};
 
           return {
@@ -573,8 +606,7 @@ exports.updateBarcodeStatus = async (req, res) => {
             quantity: item.quantity,
             price: item.price,
             discountedPrice: item.discountedPrice,
-            barcode_product_code:
-              barcode.product_code || item.product_code || null,
+            barcode_product_code: barcode.product_code || item.product_code || null,
             barcode_image_path: barcode.barcode_image_path || null,
             barcode_status: barcode.barcode_status || null,
             image: item.image,
@@ -586,12 +618,12 @@ exports.updateBarcodeStatus = async (req, res) => {
         })
     );
 
-    // 6️⃣ Build final enriched response payload
-    const responsePayload = {
+    // 🔟 Send enriched response with all original fields
+    res.json({
       barcode_id: order.id,
       product_code: order.product_code,
       barcode_image_path: order.barcode_image_path,
-      barcode_status: order.barcode_status,
+      barcode_status: barcode_status || order.barcode_status,
       barcode_created: order.created_at,
       order_id: order.order_id,
       customer_id: order.customer_id,
@@ -599,7 +631,7 @@ exports.updateBarcodeStatus = async (req, res) => {
       customer_email: order.customer_email,
       customer_phone: order.customer_phone,
       customer_address: order.customer_address,
-      order_status: order.order_status,
+      order_status: finalStatus,
       subtotal: order.subtotal,
       shipping: order.shipping,
       tax: order.tax,
@@ -615,7 +647,6 @@ exports.updateBarcodeStatus = async (req, res) => {
       price: order.product_price || order.price,
       discount: order.discount,
       trend: order.trend,
-      // image: order.product_image,
       razorpay_payment_id: order.razorpay_payment_id,
       razorpay_order_id: order.razorpay_order_id,
       razorpay_signature: order.razorpay_signature,
@@ -624,33 +655,11 @@ exports.updateBarcodeStatus = async (req, res) => {
       issue_product_code: order.issue_product_code,
       issue_description: order.issue_description,
       admin_issue_returnReply: order.admin_issue_returnReply,
-    };
-
-    // 7️⃣ Send enriched response to client
-    res.json(responsePayload);
-
-    // 8️⃣ Update barcode + order status if provided
-    if (barcode_status) {
-      await db.query(
-        `UPDATE order_barcodes SET barcode_status = ? WHERE product_code = ?`,
-        [barcode_status, product_code]
-      );
-
-      await db.query(`UPDATE full_orders SET order_status = ? WHERE id = ?`, [
-        barcode_status,
-        order.order_id,
-      ]);
-
-      const io = getIo();
-      io.emit("barcodeStatusUpdated", {
-        order_id: order.order_id,
-        product_code,
-        new_status: barcode_status,
-        updated_at: new Date(),
-      });
-    }
+    });
   } catch (error) {
     console.error("Barcode update error:", error);
     res.status(500).json({ error: "Failed to update barcode status" });
   }
 };
+
+

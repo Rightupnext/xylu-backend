@@ -280,42 +280,56 @@ exports.PermenantlydeleteProduct = async (req, res) => {
   const uploadDir = path.join(__dirname, "../../uploads/products");
 
   try {
-    // Step 1: Get images (JSON array) from DB
-    const [rows] = await db.query(`SELECT images FROM boutique_inventory WHERE id = ?`, [id]);
+    // 1️⃣ Check if product exists
+    const [rows] = await db.query(
+      `SELECT image FROM boutique_inventory WHERE id = ?`,
+      [id]
+    );
 
     if (rows.length === 0) {
       return res.status(404).json({ message: "Product not found" });
     }
 
+    // 2️⃣ Extract image field (single or multiple)
+    let imageField = rows[0].image;
     let imagesArray = [];
+
     try {
-      imagesArray = JSON.parse(rows[0].images || "[]");
+      // In case "image" contains JSON (array of images)
+      if (imageField && imageField.startsWith("[")) {
+        imagesArray = JSON.parse(imageField);
+      } else if (imageField) {
+        imagesArray = [imageField];
+      }
     } catch {
       imagesArray = [];
     }
 
-    // Step 2: Delete product and variants
-    await db.query(`DELETE FROM boutique_inventory WHERE id = ?`, [id]);
+    // 3️⃣ Delete product and related variants
     await db.query(`DELETE FROM inventory_variants WHERE product_id = ?`, [id]);
+    await db.query(`DELETE FROM boutique_inventory WHERE id = ?`, [id]);
 
-    // Step 3: Delete images from folder
+    // 4️⃣ Delete images from folder
     for (const img of imagesArray) {
       const cleanImage = img.replace(/^products\//, "").trim();
       const imagePath = path.join(uploadDir, cleanImage);
 
-      if (fsSync.existsSync(imagePath)) {
-        await fs.unlink(imagePath);
-        console.log("🗑 Deleted image from folder:", cleanImage);
-      } else {
-        console.log("⚠️ Image file not found or already deleted:", cleanImage);
+      try {
+        if (fsSync.existsSync(imagePath)) {
+          await fs.unlink(imagePath);
+          console.log("🗑 Deleted image:", imagePath);
+        } else {
+          console.log("⚠️ Image not found (skipped):", imagePath);
+        }
+      } catch (err) {
+        console.error("⚠️ Failed to delete image:", err.message);
       }
     }
 
-    res.json({ message: "✅ Product and images deleted successfully" });
-
+    res.json({ message: "✅ Product and images permanently deleted" });
   } catch (error) {
     console.error("❌ Deletion failed:", error.message);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Internal Server Error" });
   }
 };
 exports.softDeleteProduct = async (req, res) => {

@@ -1,9 +1,18 @@
+// controllers/barcodeController.js
 const pool = require("../db");
+const { getIo } = require("../socket/socket");
 
-// ✅ Fetch tracking info by product_code
+// =======================
+// TRACK BARCODE BY PRODUCT CODE
+// =======================
 exports.trackByBarcode = async (req, res) => {
   try {
     const { product_code } = req.params;
+    // console.log("product_code", product_code);
+
+    if (!product_code) {
+      return res.status(400).json({ error: "product_code is required" });
+    }
 
     const [rows] = await pool.query(
       `
@@ -44,24 +53,26 @@ exports.trackByBarcode = async (req, res) => {
       INNER JOIN boutique_inventory bi ON ob.product_id = bi.id
       WHERE ob.product_code = ?
       `,
-      [product_code]
+      [String(product_code)]
     );
 
-    if (rows.length === 0) {
+    if (!rows || rows.length === 0) {
       return res.status(404).json({ error: "No record found for this barcode" });
     }
 
     const order = rows[0];
 
-    // cart_items is JSON string in DB
+    // Parse cart_items JSON
     let cartItems = [];
     if (order.cart_items) {
       try {
         cartItems = typeof order.cart_items === "string" ? JSON.parse(order.cart_items) : order.cart_items;
-      } catch {}
+      } catch (err) {
+        console.error("Failed to parse cart_items:", err);
+      }
     }
 
-    // Extract color and size from product_code (format: x-x-x-Color-Size-x)
+    // Extract color/size from product_code
     const parts = product_code.split("-");
     const color = parts[3] || "";
     const size = parts[4] || "";
@@ -81,7 +92,6 @@ exports.trackByBarcode = async (req, res) => {
         price: item.price,
         image: item.image,
         discountedPrice: item.discountedPrice,
-        // Merge barcode info if match
         barcode_product_code: item.selectedColor === color && item.selectedSize === size ? order.barcode_product_code : null,
         barcode_image_path: item.selectedColor === color && item.selectedSize === size ? order.barcode_image_path : null,
         barcode_status: item.selectedColor === color && item.selectedSize === size ? order.barcode_status : null,
@@ -92,8 +102,7 @@ exports.trackByBarcode = async (req, res) => {
       return res.status(404).json({ error: "No matching item in cart" });
     }
 
-    // Return enriched response
-    res.json({
+    const responseData = {
       barcode_id: order.barcode_id,
       product_code: order.barcode_product_code,
       barcode_image_path: order.barcode_image_path,
@@ -118,12 +127,26 @@ exports.trackByBarcode = async (req, res) => {
       discount: order.discount,
       trend: order.trend,
       image: order.image,
-    });
+    };
+
+    // console.log("responseData", responseData);
+
+    // Emit update globally (not per user)
+    const io = getIo();
+    io.emit("barcodeUpdate", responseData);
+
+    // Return response
+    res.json(responseData);
   } catch (error) {
     console.error("Barcode Tracking Error:", error);
     res.status(500).json({ error: "Failed to fetch tracking details" });
   }
 };
+
+
+// =======================
+// UPDATE DELIVERY PARTNER
+// =======================
 exports.updateDeliveryPartner = async (req, res) => {
   const partnerId = req.params.id;
   const payload = req.body;
@@ -131,33 +154,39 @@ exports.updateDeliveryPartner = async (req, res) => {
   try {
     const connection = await pool.getConnection();
 
-    // Check if partner exists
     const [rows] = await connection.execute(
       "SELECT * FROM delivery_partners WHERE id = ?",
-      [partnerId]
+      [Number(partnerId)]
     );
 
-    if (rows.length === 0) {
+    if (!rows || rows.length === 0) {
       connection.release();
       return res.status(404).json({ message: "Delivery partner not found" });
     }
 
-    // Prepare Products JSON
     let existingProducts = rows[0].Products ? JSON.parse(rows[0].Products) : [];
-    existingProducts.push(payload); // append new payload
+    existingProducts.push(payload);
 
     const productsJSON = JSON.stringify(existingProducts);
     const productCount = existingProducts.length;
 
-    // Update partner record
     await connection.execute(
       `UPDATE delivery_partners 
        SET Products = ?, Count = ?, updated_at = CURRENT_TIMESTAMP 
        WHERE id = ?`,
-      [productsJSON, productCount, partnerId]
+      [productsJSON, productCount, Number(partnerId)]
     );
 
     connection.release();
+
+    // Emit via Socket.IO
+    const io = getIo();
+    io.emit("deliveryPartnerUpdate", {
+      partnerId,
+      Count: productCount,
+      Products: existingProducts,
+    });
+
     res.json({
       message: "Delivery partner products updated successfully",
       Count: productCount,

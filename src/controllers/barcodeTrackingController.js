@@ -7,10 +7,11 @@ const { getIo } = require("../socket/socket");
 // =======================
 exports.trackByBarcode = async (req, res) => {
   try {
-    const { userId, product_code } = req.params;
+    const { product_code } = req.params;
+    // console.log("product_code", product_code);
 
-    if (!userId || !product_code) {
-      return res.status(400).json({ error: "userId and product_code are required" });
+    if (!product_code) {
+      return res.status(400).json({ error: "product_code is required" });
     }
 
     const [rows] = await pool.query(
@@ -50,9 +51,9 @@ exports.trackByBarcode = async (req, res) => {
       FROM order_barcodes ob
       INNER JOIN full_orders fo ON ob.order_id = fo.id
       INNER JOIN boutique_inventory bi ON ob.product_id = bi.id
-      WHERE ob.product_code = ? AND fo.customer_id = ?
+      WHERE ob.product_code = ?
       `,
-      [String(product_code), Number(userId)]
+      [String(product_code)]
     );
 
     if (!rows || rows.length === 0) {
@@ -128,9 +129,11 @@ exports.trackByBarcode = async (req, res) => {
       image: order.image,
     };
 
-    // Emit via Socket.IO to specific user room
+    // console.log("responseData", responseData);
+
+    // Emit update globally (not per user)
     const io = getIo();
-    io.to(`user_${userId}`).emit("barcodeUpdate", responseData);
+    io.emit("barcodeUpdate", responseData);
 
     // Return response
     res.json(responseData);
@@ -139,6 +142,7 @@ exports.trackByBarcode = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch tracking details" });
   }
 };
+
 
 // =======================
 // UPDATE DELIVERY PARTNER

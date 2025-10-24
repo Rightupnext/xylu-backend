@@ -255,8 +255,12 @@ exports.AddDeliveryProducts_D_Partner_Wise = async (req, res) => {
     });
 
     // Filter only shipped orders
+    // Exclude only pending and packed orders
     const shippedProducts = newProducts.filter(
-      (item) => orderStatusMap[item.order_id] === "shipped"
+      (item) => {
+        const status = orderStatusMap[item.order_id];
+        return status !== "pending" && status !== "packed";
+      }
     );
 
     if (shippedProducts.length === 0) {

@@ -1,7 +1,7 @@
-import pool from "../db.js";
+const pool=require("../db.js");
 
 // Get all users with optional role filter and search
-export const getUsers = async (req, res) => {
+exports.getUsers = async (req, res) => {
   try {
     const { role, search } = req.query;
     let sql = `SELECT id, username, email, phone, role FROM users WHERE 1=1`;
@@ -28,7 +28,7 @@ export const getUsers = async (req, res) => {
 };
 
 // Update user role
-export const updateUserRole = async (req, res) => {
+exports.updateUserRole = async (req, res) => {
   try {
     const { userId, role } = req.body;
 

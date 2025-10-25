@@ -242,7 +242,17 @@ exports.AddDeliveryProducts_D_Partner_Wise = async (req, res) => {
       });
     }
 
-    // 🔍 Fetch matching orders from full_orders table
+    // 1️⃣ Update deliveryman_name & deliveryman_phone in full_orders
+    for (const item of newProducts) {
+      await pool.query(
+        `UPDATE full_orders 
+         SET deliveryman_name = ?, deliveryman_phone = ? 
+         WHERE id = ?`,
+        [item.deliveryman_name, item.deliveryman_phone, item.order_id]
+      );
+    }
+
+    // 2️⃣ Fetch current order status from full_orders
     const [orders] = await pool.query(
       `SELECT id, order_status FROM full_orders WHERE id IN (?)`,
       [orderIds]
@@ -271,7 +281,7 @@ exports.AddDeliveryProducts_D_Partner_Wise = async (req, res) => {
       });
     }
 
-    // Fetch current JSON from DB
+    // 3️⃣ Fetch current delivery partner products
     const [rows] = await pool.query(
       "SELECT Deivery_Products, Count FROM delivery_partners WHERE id = ?",
       [partnerId]

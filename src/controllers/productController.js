@@ -100,7 +100,7 @@ exports.updateProductWithVariants = async (req, res) => {
   } = req.body;
 
   const uploadDir = path.join(__dirname, "../../uploads/products");
-  const newImage = req.imageFilename || null; // multer saved filename
+  const newImage = req.imageFilename || null; // multer filename
   let parsedVariants = [];
 
   const connection = await db.getConnection();
@@ -108,7 +108,7 @@ exports.updateProductWithVariants = async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    // 1. Fetch old product details
+    // 1️⃣ Fetch old product details
     const [rows] = await connection.query(
       `SELECT image FROM boutique_inventory WHERE id = ?`,
       [id]
@@ -124,53 +124,38 @@ exports.updateProductWithVariants = async (req, res) => {
       ? rows[0].image.replace(/^products\//, "").trim()
       : null;
 
-    let finalImage = oldImage;
+    let finalImage = rows[0].image || null;
 
-    // 2. Handle image update logic
+    // 2️⃣ Normalize image path function
+    const normalizeImagePath = (img) => {
+      if (!img) return null;
+      return img.startsWith("products/") ? img : "products/" + img;
+    };
+
+    // 3️⃣ Handle image update logic
     if (newImage) {
       // Case A: new upload → delete old
       if (oldImage) {
         const oldImagePath = path.join(uploadDir, oldImage);
-        console.log("🔍 Trying to delete old image:", oldImagePath);
         if (fsSync.existsSync(oldImagePath)) {
-          try {
-            await fs.unlink(oldImagePath);
-            console.log("🗑 Deleted old image:", oldImagePath);
-          } catch (err) {
-            console.warn("⚠️ Failed to delete old image:", err.message);
-          }
-        } else {
-          console.log("⚠️ Old image not found:", oldImagePath);
+          await fs.unlink(oldImagePath);
         }
       }
-      finalImage = newImage;
+      finalImage = normalizeImagePath(newImage);
     } else if (existingImage) {
-      // Case B: frontend kept an existing image
-      const normalizedExisting = existingImage
-        .replace(/^products\//, "")
-        .trim();
-
+      const normalizedExisting = existingImage.replace(/^products\//, "").trim();
       if (oldImage && oldImage !== normalizedExisting) {
         const oldImagePath = path.join(uploadDir, oldImage);
-        console.log("🔍 Trying to delete replaced image:", oldImagePath);
         if (fsSync.existsSync(oldImagePath)) {
-          try {
-            await fs.unlink(oldImagePath);
-            console.log("🗑 Deleted replaced image:", oldImagePath);
-          } catch (err) {
-            console.warn("⚠️ Failed to delete replaced image:", err.message);
-          }
-        } else {
-          console.log("⚠️ Replaced image not found:", oldImagePath);
+          await fs.unlink(oldImagePath);
         }
       }
-      finalImage = normalizedExisting;
+      finalImage = normalizeImagePath(normalizedExisting);
     } else {
-      // Case C: nothing given → fallback to old
-      finalImage = oldImage;
+      finalImage = rows[0].image ? normalizeImagePath(rows[0].image) : null;
     }
 
-    // 3. Normalize offerExpiry
+    // 4️⃣ Normalize offerExpiry
     let finalOfferExpiry = null;
     if (offerExpiry) {
       if (Array.isArray(offerExpiry)) {
@@ -185,7 +170,7 @@ exports.updateProductWithVariants = async (req, res) => {
       }
     }
 
-    // 4. Update product info
+    // 5️⃣ Update main product fields
     await connection.query(
       `UPDATE boutique_inventory 
        SET product_name = ?, product_code = ?, category = ?, description = ?, 
@@ -206,39 +191,35 @@ exports.updateProductWithVariants = async (req, res) => {
       ]
     );
 
-    // 5. Parse and update variants
-    parsedVariants =
-      typeof variants === "string" ? JSON.parse(variants) : variants;
+    // 6️⃣ Parse and update variants
+    parsedVariants = typeof variants === "string" ? JSON.parse(variants) : variants;
 
     if (!Array.isArray(parsedVariants)) {
       throw new Error("Variants must be an array");
     }
 
     // Delete old variants
-    await connection.query(
-      `DELETE FROM inventory_variants WHERE product_id = ?`,
-      [id]
-    );
+    await connection.query(`DELETE FROM inventory_variants WHERE product_id = ?`, [id]);
 
     // Insert new variants
-    for (const variant of parsedVariants) {
+    const variantInsertPromises = parsedVariants.map((variant) => {
       const sizeString = Array.isArray(variant.size)
         ? variant.size.join(",")
         : String(variant.size);
-
-      await connection.query(
+      return connection.query(
         `INSERT INTO inventory_variants (product_id, color, size, quantity)
          VALUES (?, ?, ?, ?)`,
         [id, variant.color, sizeString, variant.quantity]
       );
-    }
+    });
 
-    // Commit transaction
+    await Promise.all(variantInsertPromises);
+
     await connection.commit();
 
     res.json({
       message: "✅ Product and variants updated successfully",
-      image: finalImage,
+      image: finalImage, // always in format "products/filename.png"
     });
   } catch (error) {
     await connection.rollback();
